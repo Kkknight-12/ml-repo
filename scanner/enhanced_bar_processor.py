@@ -233,20 +233,29 @@ class EnhancedBarProcessor:
         # Get kernel crossovers for dynamic exits
         kernel_crosses = self._get_kernel_crossovers()
 
-        # Generate entry signals
-        start_long, start_short = self.signal_generator.check_entry_conditions(
-            signal, self.signal_history, is_bullish_kernel, is_bearish_kernel,
-            is_ema_uptrend, is_ema_downtrend, is_sma_uptrend, is_sma_downtrend
-        )
+        # Generate entry signals (only after warmup period)
+        # Pine Script doesn't generate any trading signals during warmup
+        if bar_index >= self.settings.max_bars_back:
+            start_long, start_short = self.signal_generator.check_entry_conditions(
+                signal, self.signal_history, is_bullish_kernel, is_bearish_kernel,
+                is_ema_uptrend, is_ema_downtrend, is_sma_uptrend, is_sma_downtrend
+            )
+        else:
+            # During warmup, no entry signals
+            start_long, start_short = False, False
 
         # Calculate bars held
         bars_held = self.signal_generator.calculate_bars_held(self.entry_history)
 
-        # Generate exit signals
-        end_long, end_short = self.signal_generator.check_exit_conditions(
-            bars_held, self.signal_history, self.entry_history,
-            self.settings.use_dynamic_exits, kernel_crosses
-        )
+        # Generate exit signals (only after warmup period)
+        if bar_index >= self.settings.max_bars_back:
+            end_long, end_short = self.signal_generator.check_exit_conditions(
+                bars_held, self.signal_history, self.entry_history,
+                self.settings.use_dynamic_exits, kernel_crosses
+            )
+        else:
+            # During warmup, no exit signals
+            end_long, end_short = False, False
 
         # Check for early signal flip
         is_early_flip = self.signal_generator.is_early_signal_flip(self.signal_history)
