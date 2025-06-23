@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timedelta
 from config.settings import TradingConfig
-from scanner.enhanced_bar_processor_debug import EnhancedBarProcessorDebug
+from scanner import BarProcessor
 from data.zerodha_client import ZerodhaClient
 import json
 import logging
@@ -132,7 +132,7 @@ while current_end_date > from_date:
 test_logger.info(f"✅ Total fetched: {len(data)} bars")
 
 # Create processor with fixed implementations
-processor = EnhancedBarProcessorDebug(config, symbol, 'day')
+processor = BarProcessor(config, symbol, 'day')
 
 # Process bars and track metrics
 print(f"\nProcessing {len(data)} bars...")

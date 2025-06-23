@@ -11,7 +11,7 @@ from .enhanced_indicators import (
     enhanced_atr, enhanced_ema, enhanced_change,
     get_indicator_manager
 )
-from .indicators import calculate_adx  # Still using this for now
+from .enhanced_indicators import enhanced_dmi  # Using enhanced version
 from .na_handling import filter_none_values, safe_divide
 
 

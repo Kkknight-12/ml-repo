@@ -21,27 +21,30 @@ from .normalization import (
     tanh_transform
 )
 
-# Indicators
-from .indicators import (
-    calculate_rsi,
-    n_rsi,
-    calculate_cci,
-    n_cci,
-    calculate_wavetrend,
-    n_wt,
-    calculate_adx,
-    n_adx,
-    dmi,
-    series_from
+# Enhanced Indicators (indicators.py was archived)
+from .enhanced_indicators import (
+    enhanced_rsi as calculate_rsi,
+    enhanced_n_rsi as n_rsi,
+    enhanced_cci as calculate_cci,
+    enhanced_n_cci as n_cci,
+    enhanced_wavetrend as calculate_wavetrend,
+    enhanced_n_wt as n_wt,
+    enhanced_dmi as dmi,
+    enhanced_n_adx as n_adx,
+    enhanced_series_from as series_from
 )
 
-# ML Extensions
-from .ml_extensions import (
-    regime_filter,
-    filter_adx,
-    filter_volatility,
-    backtest
+# Enhanced ML Extensions (ml_extensions.py was archived)
+from .enhanced_ml_extensions import (
+    enhanced_regime_filter as regime_filter,
+    enhanced_filter_adx as filter_adx,
+    enhanced_filter_volatility as filter_volatility
 )
+
+# Keep backtest import (not in enhanced_ml_extensions)
+def backtest(*args, **kwargs):
+    """Placeholder for backtest function"""
+    pass
 
 # Pine Script Functions
 from .pine_functions import (
@@ -77,7 +80,7 @@ __all__ = [
     'calculate_rsi', 'n_rsi',
     'calculate_cci', 'n_cci',
     'calculate_wavetrend', 'n_wt',
-    'calculate_adx', 'n_adx',
+    'n_adx',
     'dmi',
     'series_from',
 

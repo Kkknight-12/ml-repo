@@ -28,8 +28,38 @@ from scanner.signal_generator import SignalGenerator
 from core.na_handling import validate_ohlcv
 from utils.risk_management import calculate_trade_levels
 
-# Reuse the same BarResult dataclass
-from scanner.bar_processor import BarResult
+# BarResult dataclass definition (moved from bar_processor.py)
+@dataclass
+class BarResult:
+    """Result of processing a single bar"""
+    bar_index: int
+
+    # Prices
+    open: float
+    high: float
+    low: float
+    close: float
+
+    # ML Output
+    prediction: float
+    signal: int
+
+    # Entry/Exit Signals
+    start_long_trade: bool
+    start_short_trade: bool
+    end_long_trade: bool
+    end_short_trade: bool
+
+    # Filters
+    filter_states: Dict[str, bool]
+
+    # Additional Info
+    is_early_signal_flip: bool
+    prediction_strength: float
+    
+    # Risk Management (optional)
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
 
 
 class EnhancedBarProcessor:
@@ -42,7 +72,7 @@ class EnhancedBarProcessor:
     - More efficient and accurate (matches Pine Script behavior)
     """
 
-    def __init__(self, config: TradingConfig, symbol: str, timeframe: str = "5min"):
+    def __init__(self, config: TradingConfig, symbol: str, timeframe: str = "5min", debug_mode: bool = False):
         """
         Initialize with configuration and symbol info
 
@@ -50,10 +80,12 @@ class EnhancedBarProcessor:
             config: Complete trading configuration
             symbol: Trading symbol (e.g., 'RELIANCE')
             timeframe: Timeframe for indicators (e.g., '5min', 'daily')
+            debug_mode: Enable comprehensive debug logging
         """
         self.config = config
         self.symbol = symbol
         self.timeframe = timeframe
+        self.debug_mode = debug_mode
         self.settings = config.get_settings()
         self.filter_settings = config.get_filter_settings()
 
@@ -81,6 +113,14 @@ class EnhancedBarProcessor:
         
         # Track bars processed
         self.bars_processed = 0
+        
+        # Debug tracking for filter pass rates
+        if self.debug_mode:
+            self.volatility_pass_count = 0
+            self.regime_pass_count = 0
+            self.adx_pass_count = 0
+            self.total_bars_for_filters = 0
+            self._log_configuration()
 
     def process_bar(self, open_price: float, high: float, low: float,
                     close: float, volume: float = 0.0) -> Optional[BarResult]:
@@ -125,9 +165,20 @@ class EnhancedBarProcessor:
         min_training_bars = 20
         
         if len(self.ml_model.y_train_array) >= min_training_bars:
-            self.ml_model.predict(
-                feature_series, self.feature_arrays, bar_index
-            )
+            if self.debug_mode:
+                # Use debug version of predict if available
+                if hasattr(self.ml_model, 'predict_with_debug'):
+                    self.ml_model.predict_with_debug(
+                        feature_series, self.feature_arrays, bar_index
+                    )
+                else:
+                    self.ml_model.predict(
+                        feature_series, self.feature_arrays, bar_index
+                    )
+            else:
+                self.ml_model.predict(
+                    feature_series, self.feature_arrays, bar_index
+                )
         else:
             self.ml_model.prediction = 0.0
         
@@ -141,8 +192,20 @@ class EnhancedBarProcessor:
         # Update signal based on prediction AND filters
         signal = self.ml_model.update_signal(filter_all)
         
+        # Update debug counters if enabled
+        if self.debug_mode:
+            if filter_states['volatility']:
+                self.volatility_pass_count += 1
+            if filter_states['regime']:
+                self.regime_pass_count += 1
+            if filter_states['adx']:
+                self.adx_pass_count += 1
+            self.total_bars_for_filters += 1
+        
         # Debug output
-        if self.bars_processed % 100 == 0 or (self.bars_processed > 50 and abs(ml_prediction) < 0.1):
+        if self.debug_mode and (self.bars_processed % 10 == 0 or signal != (self.signal_history[0] if self.signal_history else 0)):
+            self._log_debug_info(bar_index, ml_prediction, signal, filter_states, filter_all)
+        elif self.bars_processed % 100 == 0 or (self.bars_processed > 50 and abs(ml_prediction) < 0.1):
             print(f"\n📊 Enhanced DEBUG Bar {bar_index} [{self.symbol}]:")
             print(f"  ML Prediction (raw): {ml_prediction:.2f}")
             print(f"  Signal (after filters): {signal}")
@@ -431,3 +494,76 @@ class EnhancedBarProcessor:
     def get_indicator_stats(self) -> dict:
         """Get statistics about stateful indicators being used"""
         return get_indicator_manager().get_stats()
+    
+    def _log_configuration(self):
+        """Log configuration at startup (debug mode)"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.warning("========== ENHANCED BAR PROCESSOR CONFIGURATION ==========")
+        
+        logger.info("🔧 CORE ML SETTINGS:")
+        logger.info(f"  - Source: {self.settings.source}")
+        logger.info(f"  - Neighbors Count: {self.settings.neighbors_count}")
+        logger.info(f"  - Max Bars Back: {self.settings.max_bars_back}")
+        logger.info(f"  - Feature Count: {self.settings.feature_count}")
+        
+        logger.info("📊 FILTER SETTINGS:")
+        logger.info(f"  - Use Volatility Filter: {'ON ✅' if self.filter_settings.use_volatility_filter else 'OFF ❌'}")
+        logger.info(f"  - Use Regime Filter: {'ON ✅' if self.filter_settings.use_regime_filter else 'OFF ❌'}")
+        logger.info(f"  - Use ADX Filter: {'ON ✅' if self.filter_settings.use_adx_filter else 'OFF ❌'}")
+        logger.info(f"  - Regime Threshold: {self.filter_settings.regime_threshold}")
+        logger.info(f"  - ADX Threshold: {self.filter_settings.adx_threshold}")
+        
+        logger.info("🧮 KERNEL SETTINGS:")
+        logger.info(f"  - Use Kernel Filter: {'ON ✅' if self.config.use_kernel_filter else 'OFF ❌'}")
+        logger.info(f"  - Use Kernel Smoothing: {'ON ✅' if self.config.use_kernel_smoothing else 'OFF ❌'}")
+        
+        logger.warning("========== END CONFIGURATION ==========")
+    
+    def _log_debug_info(self, bar_index: int, ml_prediction: float, signal: int, 
+                       filter_states: Dict[str, bool], filter_all: bool):
+        """Log comprehensive debug information"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Calculate pass rates
+        if self.total_bars_for_filters > 0:
+            volatility_rate = (self.volatility_pass_count / self.total_bars_for_filters) * 100
+            regime_rate = (self.regime_pass_count / self.total_bars_for_filters) * 100
+            adx_rate = (self.adx_pass_count / self.total_bars_for_filters) * 100
+        else:
+            volatility_rate = regime_rate = adx_rate = 0.0
+        
+        # Log filter results
+        logger.info(f"Bar {bar_index} | FILTER RESULTS:")
+        logger.info(f"  - Volatility Filter: {filter_states['volatility']} (Pass rate: {volatility_rate:.1f}%)")
+        logger.info(f"  - Regime Filter: {filter_states['regime']} (Pass rate: {regime_rate:.1f}%)")
+        logger.info(f"  - ADX Filter: {filter_states['adx']} (Pass rate: {adx_rate:.1f}%)")
+        logger.info(f"  - All Filters Pass: {filter_all}")
+        
+        # Check signal changes
+        prev_signal = self.signal_history[0] if self.signal_history else 0
+        if signal != prev_signal:
+            logger.error(f"Bar {bar_index} | ★★★ SIGNAL CHANGED ★★★ from {prev_signal} to {signal}")
+            if ml_prediction > 0 and filter_all:
+                logger.warning(f"  *** SIGNAL SET TO LONG *** (prediction={ml_prediction:.2f} > 0 AND filter_all=true)")
+            elif ml_prediction < 0 and filter_all:
+                logger.warning(f"  *** SIGNAL SET TO SHORT *** (prediction={ml_prediction:.2f} < 0 AND filter_all=true)")
+        
+        # Log why signal might be stuck
+        if not filter_all:
+            logger.error(f"Bar {bar_index} | ⚠️ SIGNAL STUCK because filter_all=FALSE!")
+            if not filter_states['volatility']:
+                logger.error("  - Volatility filter FAILED")
+            if not filter_states['regime']:
+                logger.error("  - Regime filter FAILED")
+            if not filter_states['adx']:
+                logger.error("  - ADX filter FAILED")
+        
+        # Summary every 10 bars
+        if bar_index % 10 == 0:
+            logger.warning(f"====== SUMMARY at Bar {bar_index} ======")
+            logger.warning(f"Signal: {signal} | Prediction: {ml_prediction:.2f} | filter_all: {filter_all}")
+            logger.warning(f"Pass Rates - Vol: {volatility_rate:.1f}%, Regime: {regime_rate:.1f}%, ADX: {adx_rate:.1f}%")
+            logger.warning("===============================")

@@ -7,7 +7,7 @@ import sys
 sys.path.append('..')
 
 from config.settings import TradingConfig
-from scanner.bar_processor import BarProcessor
+from scanner import BarProcessor
 
 
 def test_small_dataset():

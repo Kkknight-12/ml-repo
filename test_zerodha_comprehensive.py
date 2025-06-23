@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Comprehensive Zerodha Test Script for Lorentzian Classification
-Tests ICICIBANK with 1 year of daily data from June 22, 2025
+Tests ICICIBANK with 3000 daily bars
 Follows Pine Script behavior exactly with all bug fixes applied
 """
 import sys
@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple, Optional
 
 # Core imports
 from config.settings import TradingConfig
-from scanner.enhanced_bar_processor_debug import EnhancedBarProcessorDebug
+from scanner import BarProcessor
 from data.zerodha_client import ZerodhaClient
 from core.pine_functions import nz, na
 from core.history_referencing import create_series
@@ -97,6 +97,15 @@ class ComprehensiveMarketTest:
     def initialize_zerodha(self) -> bool:
         """Initialize Zerodha connection"""
         try:
+            # Check if kiteconnect is available
+            try:
+                from kiteconnect import KiteConnect
+            except ImportError:
+                print("\n❌ KiteConnect not installed!")
+                print("   Please install with: pip install kiteconnect")
+                print("   Or use: pip install -r requirements.txt")
+                return False
+            
             # Check for saved session
             if os.path.exists('.kite_session.json'):
                 with open('.kite_session.json', 'r') as f:
@@ -117,15 +126,16 @@ class ComprehensiveMarketTest:
             print(f"❌ Zerodha error: {str(e)}")
             return False
     
-    def fetch_historical_data(self, symbol: str, days: int = 365) -> Optional[pd.DataFrame]:
+    def fetch_historical_data(self, symbol: str, days: int = 3000) -> Optional[pd.DataFrame]:
         """
         Fetch historical data from Zerodha
-        1 year = 365 days (including weekends/holidays)
+        3000 days = ~8.2 years of calendar days (to get 3000 trading days)
         """
         try:
-            # Set to June 22, 2025 as requested
-            to_date = datetime(2025, 6, 22)
-            from_date = to_date - timedelta(days=days)
+            # For 3000 trading days, we need approximately 4200 calendar days
+            # (accounting for weekends and holidays)
+            to_date = datetime.now()
+            from_date = to_date - timedelta(days=4200)  # ~11.5 years to ensure we get 3000 bars
             
             print(f"\n📊 Fetching {symbol} from {from_date.date()} to {to_date.date()}")
             
@@ -139,24 +149,76 @@ class ComprehensiveMarketTest:
             instrument_token = self.kite_client.symbol_token_map[symbol]
             
             # Fetch data in chunks to avoid rate limits
+            # Zerodha has a limit of 2000 candles per request
             all_data = []
-            chunk_days = 365  # For 1 year, we can fetch in one go
+            chunk_size = 2000  # Maximum bars per request
             
+            # We need to fetch in reverse chronological order
             current_to = to_date
-            while current_to > from_date:
-                current_from = max(current_to - timedelta(days=chunk_days), from_date)
+            total_bars_needed = 3000
+            bars_fetched = 0
+            
+            print(f"  📦 Fetching in chunks (max {chunk_size} bars per request)...")
+            
+            # Zerodha's actual limit is 2000 days for the date range, not bars
+            # For daily candles, we need to limit date range to < 2000 days
+            max_days_per_request = 1999  # Stay under 2000 day limit
+            
+            while bars_fetched < total_bars_needed and current_to > from_date:
+                # Calculate date range for this chunk
+                # Use max_days_per_request to stay within Zerodha's limit
+                current_from = current_to - timedelta(days=max_days_per_request)
                 
-                chunk_data = self.kite_client.kite.historical_data(
-                    instrument_token=instrument_token,
-                    from_date=current_from.strftime("%Y-%m-%d %H:%M:%S"),
-                    to_date=current_to.strftime("%Y-%m-%d %H:%M:%S"),
-                    interval="day"
-                )
+                # Don't go before our overall from_date
+                if current_from < from_date:
+                    current_from = from_date
                 
-                if chunk_data:
-                    all_data.extend(chunk_data)
+                # Calculate actual days in this range
+                days_in_range = (current_to - current_from).days
                 
-                current_to = current_from - timedelta(days=1)
+                print(f"  🔄 Fetching chunk: {current_from.date()} to {current_to.date()} ({days_in_range} days)")
+                
+                try:
+                    chunk_data = self.kite_client.kite.historical_data(
+                        instrument_token=instrument_token,
+                        from_date=current_from.strftime("%Y-%m-%d"),
+                        to_date=current_to.strftime("%Y-%m-%d"),
+                        interval="day"
+                    )
+                    
+                    if chunk_data:
+                        # Prepend to maintain chronological order
+                        all_data = chunk_data + all_data
+                        bars_fetched += len(chunk_data)
+                        print(f"     ✅ Got {len(chunk_data)} bars (total: {bars_fetched})")
+                        
+                        # If we have enough bars, stop
+                        if bars_fetched >= total_bars_needed:
+                            print(f"     ✅ Reached target of {total_bars_needed} bars")
+                            break
+                        
+                        # If we got very few bars, we might be at the start of data
+                        if len(chunk_data) < 100 and days_in_range > 500:
+                            print(f"     ⚠️ Received fewer bars than expected, might be at data start")
+                            break
+                    else:
+                        print(f"     ⚠️ No data received for this chunk")
+                    
+                    # Move to next chunk (with 1 day overlap to ensure continuity)
+                    current_to = current_from
+                    
+                    # Small delay to avoid rate limiting
+                    import time
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    print(f"     ❌ Error fetching chunk: {str(e)}")
+                    # Try with smaller chunk if we hit a limit
+                    if "exceeds max limit" in str(e):
+                        max_days_per_request = int(max_days_per_request * 0.8)
+                        print(f"     🔧 Reducing chunk size to {max_days_per_request} days")
+                        continue
+                    break
             
             if all_data:
                 df = pd.DataFrame(all_data)
@@ -274,7 +336,7 @@ class ComprehensiveMarketTest:
         print(f"{'='*70}")
         
         # Create enhanced processor with debug logging
-        processor = EnhancedBarProcessorDebug(self.config, symbol, "day")
+        processor = BarProcessor(self.config, symbol, "day")
         
         # Create custom series for tracking (Pine Script style)
         ml_pred_series = create_series("ML_Predictions", 500)
@@ -296,7 +358,11 @@ class ComprehensiveMarketTest:
                 'all_pass': 0
             },
             'bars_processed': 0,
-            'warmup_bars': 0
+            'warmup_bars': 0,
+            # For CSV export - Pine Script format
+            'dates': [],
+            'ohlc_data': [],
+            'all_signals': []  # Store all signal data for export
         }
         
         # Process each bar (Pine Script style - no train/test split!)
@@ -331,6 +397,10 @@ class ComprehensiveMarketTest:
                 
                 results['bars_processed'] += 1
                 
+                # Store date and OHLC for CSV export
+                results['dates'].append(idx)
+                results['ohlc_data'].append((open_price, high, low, close))
+                
                 # Track ML predictions (raw values)
                 if result.prediction != 0:
                     results['ml_predictions'].append(result.prediction)
@@ -340,12 +410,29 @@ class ComprehensiveMarketTest:
                 results['signals'].append(result.signal)
                 signal_series.update(result.signal)
                 
+                # Store detailed signal info for CSV export
+                # Get the actual date from the row
+                actual_date = row.get('date', idx)
+                signal_data = {
+                    'date': actual_date,
+                    'open': open_price,
+                    'high': high,
+                    'low': low,
+                    'close': close,
+                    'signal': result.signal,
+                    'start_long': result.start_long_trade,
+                    'start_short': result.start_short_trade,
+                    'end_long': result.end_long_trade,
+                    'end_short': result.end_short_trade
+                }
+                results['all_signals'].append(signal_data)
+                
                 # Track filter performance
                 if result.filter_states:
                     for filter_name, passed in result.filter_states.items():
                         # Fix the key matching issue - append '_passes' to match the tracking dict
                         key = f"{filter_name}_passes"
-                        if passed and key in results['filter_states']:
+                        if passed:  # Remove redundant key check - we know these keys exist
                             results['filter_states'][key] += 1
                     
                     # All filters pass
@@ -423,9 +510,288 @@ class ComprehensiveMarketTest:
         # Calculate final metrics
         self._calculate_metrics(results, processor)
         
+        # Export signals to CSV for comparison with Pine Script
+        csv_filename = self._export_signals_csv(results)
+        results['exported_csv'] = csv_filename
+        
         return results
     
-    def _calculate_metrics(self, results: Dict, processor: EnhancedBarProcessorDebug):
+    def _calculate_trade_performance(self, results: Dict, df: pd.DataFrame) -> Dict:
+        """
+        Calculate trade performance metrics (win rate, profit/loss, etc.)
+        """
+        if not results['entry_signals'] or not results['exit_signals']:
+            return {}
+        
+        # Match entries with exits
+        trades = []
+        entry_signals = results['entry_signals'].copy()
+        exit_signals = results['exit_signals'].copy()
+        
+        for entry in entry_signals:
+            # Find the next exit after this entry
+            entry_bar = entry['bar']
+            entry_type = entry['type']
+            
+            # Find matching exit
+            matching_exit = None
+            for exit in exit_signals:
+                exit_bar = exit['bar']
+                exit_type = exit['type']
+                
+                # Exit must be after entry and match the type
+                if exit_bar > entry_bar:
+                    if (entry_type == 'LONG' and exit_type == 'EXIT_LONG') or \
+                       (entry_type == 'SHORT' and exit_type == 'EXIT_SHORT'):
+                        matching_exit = exit
+                        exit_signals.remove(exit)
+                        break
+            
+            if matching_exit:
+                # Calculate profit/loss
+                entry_price = entry['price']
+                exit_price = matching_exit['price']
+                
+                if entry_type == 'LONG':
+                    profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                    profit_points = exit_price - entry_price
+                else:  # SHORT
+                    profit_pct = ((entry_price - exit_price) / entry_price) * 100
+                    profit_points = entry_price - exit_price
+                
+                trades.append({
+                    'entry_date': entry['date'],
+                    'entry_price': entry_price,
+                    'exit_date': df.iloc[matching_exit['bar']]['date'].strftime('%Y-%m-%d') if matching_exit['bar'] < len(df) else f"Bar {matching_exit['bar']}",
+                    'exit_price': exit_price,
+                    'type': entry_type,
+                    'profit_pct': profit_pct,
+                    'profit_points': profit_points,
+                    'bars_held': matching_exit['bar'] - entry_bar,
+                    'prediction_strength': entry.get('signal_strength', 0) * 100
+                })
+        
+        # Calculate performance metrics
+        if trades:
+            winning_trades = [t for t in trades if t['profit_pct'] > 0]
+            losing_trades = [t for t in trades if t['profit_pct'] <= 0]
+            
+            total_trades = len(trades)
+            wins = len(winning_trades)
+            losses = len(losing_trades)
+            win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
+            
+            # Calculate average win/loss
+            avg_win = np.mean([t['profit_pct'] for t in winning_trades]) if winning_trades else 0
+            avg_loss = np.mean([t['profit_pct'] for t in losing_trades]) if losing_trades else 0
+            
+            # Calculate profit factor
+            total_wins = sum(t['profit_pct'] for t in winning_trades) if winning_trades else 0
+            total_losses = abs(sum(t['profit_pct'] for t in losing_trades)) if losing_trades else 0
+            profit_factor = total_wins / total_losses if total_losses > 0 else float('inf') if total_wins > 0 else 0
+            
+            # Calculate expectancy
+            expectancy = (win_rate/100 * avg_win) + ((1 - win_rate/100) * avg_loss)
+            
+            return {
+                'trades': trades,
+                'total_trades': total_trades,
+                'winning_trades': wins,
+                'losing_trades': losses,
+                'win_rate': win_rate,
+                'avg_win_pct': avg_win,
+                'avg_loss_pct': avg_loss,
+                'profit_factor': profit_factor,
+                'expectancy': expectancy,
+                'total_return_pct': sum(t['profit_pct'] for t in trades),
+                'max_win_pct': max(t['profit_pct'] for t in trades) if trades else 0,
+                'max_loss_pct': min(t['profit_pct'] for t in trades) if trades else 0,
+                'avg_bars_held': np.mean([t['bars_held'] for t in trades]) if trades else 0
+            }
+        
+        return {}
+    
+    def _export_signals_csv(self, results: Dict, output_file: str = None):
+        """Export trading signals in Pine Script CSV format for comparison"""
+        import csv
+        from datetime import datetime
+        
+        if output_file is None:
+            # Create filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = f"python_signals_{results['symbol']}_{timestamp}.csv"
+        
+        print(f"\n📄 Exporting signals to {output_file}...")
+        
+        # Get signal data
+        all_signals = results.get('all_signals', [])
+        
+        if not all_signals:
+            print("❌ No signal data to export")
+            return None
+        
+        # Prepare data in Pine Script format
+        csv_data = []
+        
+        for signal_data in all_signals:
+            # Handle date - could be datetime or pandas Timestamp
+            date_obj = signal_data['date']
+            if hasattr(date_obj, 'strftime'):
+                date_str = date_obj.strftime('%Y-%m-%d')
+            else:
+                # If it's not a datetime, use it as is (might be a string already)
+                date_str = str(date_obj)
+            
+            row = {
+                'time': date_str,
+                'open': f"{signal_data['open']:.2f}",
+                'high': f"{signal_data['high']:.2f}",
+                'low': f"{signal_data['low']:.2f}",
+                'close': f"{signal_data['close']:.2f}",
+                'Buy': 'NaN',
+                'Sell': 'NaN'
+            }
+            
+            # Check for entry signals (matching Pine Script format)
+            if signal_data['start_long']:
+                row['Buy'] = f"{signal_data['low']:.2f}"  # Pine Script uses low for buy
+            elif signal_data['start_short']:
+                row['Sell'] = f"{signal_data['high']:.2f}"  # Pine Script uses high for sell
+            
+            csv_data.append(row)
+        
+        # Write CSV
+        with open(output_file, 'w', newline='') as f:
+            fieldnames = ['time', 'open', 'high', 'low', 'close', 'Buy', 'Sell']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(csv_data)
+        
+        print(f"✅ Exported {len(csv_data)} rows to {output_file}")
+        
+        # Count signals
+        buy_signals = sum(1 for row in csv_data if row['Buy'] != 'NaN')
+        sell_signals = sum(1 for row in csv_data if row['Sell'] != 'NaN')
+        print(f"   Buy signals: {buy_signals}")
+        print(f"   Sell signals: {sell_signals}")
+        
+        return output_file
+    
+    def compare_with_pinescript(self, python_csv: str, pinescript_csv: str = "archive/data_files/NSE_ICICIBANK, 1D.csv"):
+        """Compare Python signals with Pine Script signals"""
+        import csv
+        from datetime import datetime
+        
+        print(f"\n🔍 Comparing Signals: Python vs Pine Script")
+        print(f"{'='*70}")
+        
+        # Read Pine Script signals
+        pine_signals = {}
+        with open(pinescript_csv, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                date = row['time']
+                if row['Buy'] != 'NaN':
+                    pine_signals[date] = ('BUY', float(row['Buy']))
+                elif row['Sell'] != 'NaN':
+                    pine_signals[date] = ('SELL', float(row['Sell']))
+        
+        # Read Python signals
+        python_signals = {}
+        with open(python_csv, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                date = row['time']
+                if row['Buy'] != 'NaN':
+                    python_signals[date] = ('BUY', float(row['Buy']))
+                elif row['Sell'] != 'NaN':
+                    python_signals[date] = ('SELL', float(row['Sell']))
+        
+        # Compare signals
+        pine_dates = set(pine_signals.keys())
+        python_dates = set(python_signals.keys())
+        
+        # Find matches and mismatches
+        matching_signals = []
+        different_signals = []
+        pine_only = []
+        python_only = []
+        
+        # Check Pine Script signals
+        for date, (signal_type, price) in pine_signals.items():
+            if date in python_signals:
+                py_type, py_price = python_signals[date]
+                if signal_type == py_type:
+                    matching_signals.append((date, signal_type, price, py_price))
+                else:
+                    different_signals.append((date, f"Pine:{signal_type}", price, f"Python:{py_type}", py_price))
+            else:
+                pine_only.append((date, signal_type, price))
+        
+        # Check Python-only signals
+        for date, (signal_type, price) in python_signals.items():
+            if date not in pine_signals:
+                python_only.append((date, signal_type, price))
+        
+        # Print results
+        print(f"\n📊 SIGNAL COMPARISON SUMMARY:")
+        print(f"   Pine Script signals: {len(pine_signals)}")
+        print(f"   Python signals: {len(python_signals)}")
+        print(f"   Matching signals: {len(matching_signals)}")
+        print(f"   Different signals: {len(different_signals)}")
+        print(f"   Pine-only signals: {len(pine_only)}")
+        print(f"   Python-only signals: {len(python_only)}")
+        
+        # Show matching signals
+        if matching_signals:
+            print(f"\n✅ MATCHING SIGNALS (same date, same type):")
+            for date, signal_type, pine_price, py_price in matching_signals[:5]:
+                print(f"   {date}: {signal_type} (Pine: ₹{pine_price:.2f}, Python: ₹{py_price:.2f})")
+            if len(matching_signals) > 5:
+                print(f"   ... and {len(matching_signals) - 5} more")
+        
+        # Show different signals
+        if different_signals:
+            print(f"\n⚠️ DIFFERENT SIGNALS (same date, different type):")
+            for date, pine_sig, pine_price, py_sig, py_price in different_signals[:5]:
+                print(f"   {date}: {pine_sig} @ ₹{pine_price:.2f} vs {py_sig} @ ₹{py_price:.2f}")
+        
+        # Show Pine-only signals
+        if pine_only:
+            print(f"\n📌 PINE SCRIPT ONLY SIGNALS:")
+            for date, signal_type, price in pine_only[:10]:
+                print(f"   {date}: {signal_type} @ ₹{price:.2f}")
+            if len(pine_only) > 10:
+                print(f"   ... and {len(pine_only) - 10} more")
+        
+        # Show Python-only signals
+        if python_only:
+            print(f"\n🐍 PYTHON ONLY SIGNALS:")
+            for date, signal_type, price in python_only[:10]:
+                print(f"   {date}: {signal_type} @ ₹{price:.2f}")
+            if len(python_only) > 10:
+                print(f"   ... and {len(python_only) - 10} more")
+        
+        # Calculate accuracy
+        accuracy = 0
+        if pine_signals:
+            accuracy = (len(matching_signals) / len(pine_signals)) * 100
+            print(f"\n📈 SIGNAL ACCURACY: {accuracy:.1f}%")
+            print(f"   (Matching signals / Total Pine Script signals)")
+        else:
+            print(f"\n⚠️ No Pine Script signals found for comparison")
+        
+        return {
+            'pine_signals': len(pine_signals),
+            'python_signals': len(python_signals),
+            'matching': len(matching_signals),
+            'different': len(different_signals),
+            'pine_only': len(pine_only),
+            'python_only': len(python_only),
+            'accuracy': accuracy
+        }
+    
+    def _calculate_metrics(self, results: Dict, processor: BarProcessor):
         """Calculate comprehensive metrics"""
         
         # ML Prediction metrics
@@ -573,13 +939,45 @@ class ComprehensiveMarketTest:
             print(f"   prediction[0] = {c['last_prediction']:.1f}")
             print(f"   signal[0] = {c['last_signal']}")
             print(f"   Total bars in memory: {c['bars_available']}")
+        
+        # Trade Performance Analysis
+        if 'trade_performance' in results and results['trade_performance']:
+            perf = results['trade_performance']
+            print(f"\n9️⃣ 📈 TRADE PERFORMANCE ANALYSIS:")
+            print(f"   Total Completed Trades: {perf['total_trades']}")
+            print(f"   Winning Trades: {perf['winning_trades']} ({perf['win_rate']:.1f}%)")
+            print(f"   Losing Trades: {perf['losing_trades']} ({100-perf['win_rate']:.1f}%)")
+            print(f"   ")
+            print(f"   💰 PROFITABILITY:")
+            print(f"   Win Rate: {perf['win_rate']:.1f}%")
+            print(f"   Average Win: +{perf['avg_win_pct']:.2f}%")
+            print(f"   Average Loss: {perf['avg_loss_pct']:.2f}%")
+            print(f"   Profit Factor: {perf['profit_factor']:.2f}")
+            print(f"   Expectancy: {perf['expectancy']:.2f}%")
+            print(f"   Total Return: {perf['total_return_pct']:.2f}%")
+            print(f"   ")
+            print(f"   📊 TRADE STATISTICS:")
+            print(f"   Best Trade: +{perf['max_win_pct']:.2f}%")
+            print(f"   Worst Trade: {perf['max_loss_pct']:.2f}%")
+            print(f"   Average Bars Held: {perf['avg_bars_held']:.0f}")
+            
+            # Show last 5 trades
+            if perf['trades']:
+                print(f"\n   📝 LAST 5 TRADES:")
+                for trade in perf['trades'][-5:]:
+                    result_emoji = "✅" if trade['profit_pct'] > 0 else "❌"
+                    print(f"   {result_emoji} {trade['type']}: {trade['entry_date']} @ ₹{trade['entry_price']:.2f} → "
+                          f"{trade['exit_date']} @ ₹{trade['exit_price']:.2f} "
+                          f"({trade['profit_pct']:+.2f}%, {trade['bars_held']} bars)")
+        elif 'trade_performance' in results:
+            print(f"\n9️⃣ 📈 TRADE PERFORMANCE: No completed trades to analyze")
     
     def run_comprehensive_test(self, symbols: List[str]):
         """Run comprehensive test on all symbols"""
         
         print("\n" + "="*70)
         print("🚀 COMPREHENSIVE LORENTZIAN CLASSIFICATION TEST")
-        print("📅 Testing ICICIBANK - 1 Year Data (June 22, 2024 to June 22, 2025)")
+        print("📅 Testing ICICIBANK - 3000 Daily Bars")
         print("="*70)
         
         # Initialize Zerodha
@@ -597,7 +995,12 @@ class ComprehensiveMarketTest:
                 df = self.fetch_historical_data(symbol)
                 
                 if df is not None and len(df) > 100:
-                    print(f"✅ Data fetched successfully: {len(df)} bars")
+                    # Limit to 3000 bars if we got more
+                    if len(df) > 3000:
+                        df = df.tail(3000).reset_index(drop=True)
+                        print(f"✅ Data fetched successfully: {len(df)} bars (limited to 3000)")
+                    else:
+                        print(f"✅ Data fetched successfully: {len(df)} bars")
                     # Analyze ML labels
                     label_stats = self.analyze_ml_labels(df, symbol)
                     
@@ -605,8 +1008,20 @@ class ComprehensiveMarketTest:
                     results = self.run_ml_test(symbol, df)
                     results['label_stats'] = label_stats
                     
+                    # Calculate trade performance
+                    trade_performance = self._calculate_trade_performance(results, df)
+                    results['trade_performance'] = trade_performance
+                    
                     # Print detailed results
                     self.print_detailed_results(symbol, results)
+                    
+                    # Compare with Pine Script signals if CSV was exported
+                    if 'exported_csv' in results and results['exported_csv']:
+                        comparison = self.compare_with_pinescript(
+                            results['exported_csv'],
+                            "archive/data_files/NSE_ICICIBANK, 1D.csv"
+                        )
+                        results['signal_comparison'] = comparison
                     
                     all_results.append(results)
                 else:
@@ -693,12 +1108,43 @@ class ComprehensiveMarketTest:
             overall_avg_hold = np.mean(avg_bars_held)
             print(f"   Average position duration: {overall_avg_hold:.1f} bars")
         
+        # Trade Performance Summary
+        print(f"\n💹 Trade Performance Summary:")
+        total_completed_trades = 0
+        total_winning_trades = 0
+        total_losing_trades = 0
+        all_win_rates = []
+        all_returns = []
+        
+        for r in all_results:
+            if 'trade_performance' in r and r['trade_performance']:
+                perf = r['trade_performance']
+                total_completed_trades += perf['total_trades']
+                total_winning_trades += perf['winning_trades']
+                total_losing_trades += perf['losing_trades']
+                all_win_rates.append(perf['win_rate'])
+                all_returns.append(perf['total_return_pct'])
+        
+        if total_completed_trades > 0:
+            overall_win_rate = (total_winning_trades / total_completed_trades) * 100
+            avg_return = np.mean(all_returns) if all_returns else 0
+            
+            print(f"   Total Completed Trades: {total_completed_trades}")
+            print(f"   Overall Win Rate: {overall_win_rate:.1f}%")
+            print(f"   Winning Trades: {total_winning_trades}")
+            print(f"   Losing Trades: {total_losing_trades}")
+            print(f"   Average Return per Symbol: {avg_return:.2f}%")
+        else:
+            print(f"   No completed trades to analyze")
+        
         print(f"\n✅ Test Summary:")
         print(f"   1. ML predictions working correctly (range -8 to +8)")
         print(f"   2. Signal transitions occur naturally with real data")
         print(f"   3. Entry signals generated based on all conditions")
         print(f"   4. Filter pass rates show appropriate selectivity")
         print(f"   5. System follows Pine Script behavior exactly")
+        if total_completed_trades > 0:
+            print(f"   6. Win rate: {overall_win_rate:.1f}% on {total_completed_trades} completed trades")
         
         print(f"\n📌 Recommendations:")
         print(f"   1. System is ready for live trading")
@@ -711,7 +1157,7 @@ class ComprehensiveMarketTest:
 def main():
     """Main entry point"""
     
-    # Test only ICICIBANK with 1 year data
+    # Test ICICIBANK with 3000 daily bars
     symbols = ['ICICIBANK']
     
     # Create and run test

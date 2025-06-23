@@ -4,7 +4,7 @@ Implements all Pine Script entry/exit logic WITHOUT state management
 """
 from typing import List, Tuple, Optional, Dict
 from data.data_types import Label, Filter
-from ml.lorentzian_knn import LorentzianKNN
+from ml.lorentzian_knn_fixed import LorentzianKNNFixed as LorentzianKNN
 
 
 class SignalGenerator:

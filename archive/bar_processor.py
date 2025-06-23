@@ -11,11 +11,11 @@ from data.data_types import (
 )
 from data.bar_data import BarData
 from config.settings import TradingConfig
-from core.indicators import series_from, enhanced_series_from
-from core.ml_extensions import regime_filter, filter_adx, filter_volatility, enhanced_regime_filter, enhanced_filter_adx, enhanced_filter_volatility
+from core.enhanced_indicators import enhanced_series_from
+from core.enhanced_ml_extensions import enhanced_regime_filter, enhanced_filter_adx, enhanced_filter_volatility
 from core.kernel_functions import is_kernel_bullish, is_kernel_bearish, get_kernel_crossovers
 from core.math_helpers import pine_ema, pine_sma
-from ml.lorentzian_knn import LorentzianKNN
+from ml.lorentzian_knn_fixed import LorentzianKNNFixed as LorentzianKNN
 from scanner.signal_generator import SignalGenerator
 from core.na_handling import validate_ohlcv  # Add NA handling
 from utils.risk_management import calculate_trade_levels

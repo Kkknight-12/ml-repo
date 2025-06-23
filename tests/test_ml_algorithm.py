@@ -8,7 +8,7 @@ sys.path.append('..')
 
 import math
 from config.settings import TradingConfig
-from scanner.bar_processor import BarProcessor, BarResult
+from scanner import BarProcessor, BarResult
 from data.data_types import Label, FeatureSeries, FeatureArrays
 from ml.lorentzian_knn import LorentzianKNN
 

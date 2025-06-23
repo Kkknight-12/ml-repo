@@ -10,12 +10,8 @@ Scanner module - Bar processing and signal generation
 # Scanner module - Bar processing and signal generation
 # """
 
-from .bar_processor import BarProcessor, BarResult
+# Import both BarResult and EnhancedBarProcessor from enhanced_bar_processor
+from .enhanced_bar_processor import EnhancedBarProcessor as BarProcessor, BarResult
 from .signal_generator import SignalGenerator
 
-# Import live scanner if dependencies available
-try:
-    from .live_scanner import LiveScanner
-    __all__ = ['BarProcessor', 'BarResult', 'SignalGenerator', 'LiveScanner']
-except ImportError:
-    __all__ = ['BarProcessor', 'BarResult', 'SignalGenerator']
+__all__ = ['BarProcessor', 'BarResult', 'SignalGenerator']

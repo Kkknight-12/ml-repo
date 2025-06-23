@@ -14,7 +14,7 @@ print("1. Testing imports...")
 try:
     # Phase 1 imports
     from config.settings import TradingConfig
-    from scanner.bar_processor import BarProcessor
+    from scanner import BarProcessor
     from ml.lorentzian_knn import LorentzianKNN
 
     print("✅ Phase 1 components imported successfully")

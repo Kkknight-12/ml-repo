@@ -5,7 +5,7 @@ Shows how to use the complete system
 import random
 import math
 from config.settings import TradingConfig
-from scanner.bar_processor import BarProcessor
+from scanner import BarProcessor
 
 
 def generate_sample_data(num_bars: int) -> list:

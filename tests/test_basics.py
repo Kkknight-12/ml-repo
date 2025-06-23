@@ -99,7 +99,7 @@ def test_bar_processor_initialization():
     """Test BarProcessor initialization with total_bars"""
     print("\nTesting BarProcessor Initialization...")
     
-    from scanner.bar_processor import BarProcessor
+    from scanner import BarProcessor
     
     config = TradingConfig(max_bars_back=100)
     

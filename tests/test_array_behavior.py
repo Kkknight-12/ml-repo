@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.data_types import FeatureArrays, FeatureSeries
 from config.settings import TradingConfig
-from scanner.bar_processor import BarProcessor
+from scanner import BarProcessor
 
 
 def test_array_behavior():

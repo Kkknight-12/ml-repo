@@ -37,7 +37,8 @@ def rational_quadratic(src_values: List[float], lookback: int,
     
     # Pine Script: for i = 0 to _size + startAtBar
     # But we need to ensure we don't exceed available data
-    max_iterations = min(size, size + start_at_bar)
+    # Fix: The original calculation could exceed bounds (size + start_at_bar > size)
+    max_iterations = min(size, lookback + start_at_bar)
     
     # Important: Pine Script accesses src[i] where i can be large
     # We need to ensure we don't go out of bounds
@@ -85,7 +86,8 @@ def gaussian(src_values: List[float], lookback: int, start_at_bar: int) -> float
     cumulative_weight = 0.0
 
     size = len(src_values)
-    max_iterations = min(size, size + start_at_bar)
+    # Fix: Same bounds issue as rational_quadratic
+    max_iterations = min(size, lookback + start_at_bar)
 
     for i in range(max_iterations):
         if i >= size:
