@@ -405,15 +405,17 @@ class ComprehensiveMarketTest:
             result = processor.process_bar(open_price, high, low, close, volume)
             
             if result:
-                # Track warmup period
-                if result.bar_index < 50:
-                    results['warmup_bars'] += 1
-                    # DEBUG: Check if we're skipping too many bars
-                    if result.bar_index % 10 == 0:
-                        print(f"   DEBUG: Skipping warmup bar {result.bar_index}")
-                    continue
-                
+                # Process ALL bars - Pine Script doesn't skip bars during warmup
+                # It processes all bars but delays ML predictions until sufficient data
                 results['bars_processed'] += 1
+                
+                # Track ML warmup period (maxBarsBack from config)
+                max_bars_back = self.config.max_bars_back  # Default: 2000
+                if result.bar_index < max_bars_back:
+                    results['warmup_bars'] += 1
+                    # During warmup, ML predictions should be 0
+                    if result.bar_index % 500 == 0:
+                        print(f"   📊 Warmup progress: {result.bar_index}/{max_bars_back} bars")
                 
                 # Store date and OHLC for CSV export
                 results['dates'].append(idx)

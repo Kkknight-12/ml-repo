@@ -161,10 +161,13 @@ class EnhancedBarProcessor:
             close_4_bars_ago = self.bars.get_close(4)
             self.ml_model.update_training_data(close, close_4_bars_ago)
 
-        # Run ML prediction if we have enough training data
-        min_training_bars = 20
+        # Pine Script warmup logic: bar_index >= maxBarsBackIndex
+        # where maxBarsBackIndex = last_bar_index >= maxBarsBack ? last_bar_index - maxBarsBack : 0
+        # This ensures we have sufficient historical data for k-NN pattern matching
         
-        if len(self.ml_model.y_train_array) >= min_training_bars:
+        # For streaming data, we don't know last_bar_index, so we check if we have enough bars
+        # ML predictions only start after we have maxBarsBack worth of data
+        if bar_index >= self.settings.max_bars_back:
             if self.debug_mode:
                 # Use debug version of predict if available
                 if hasattr(self.ml_model, 'predict_with_debug'):
@@ -180,7 +183,14 @@ class EnhancedBarProcessor:
                     feature_series, self.feature_arrays, bar_index
                 )
         else:
+            # During warmup period, set prediction to 0 (Pine Script behavior)
             self.ml_model.prediction = 0.0
+            
+            # Log warmup progress periodically
+            if bar_index % 500 == 0 and bar_index > 0:
+                remaining = self.settings.max_bars_back - bar_index
+                print(f"   📊 ML Warmup: {bar_index}/{self.settings.max_bars_back} bars "
+                      f"({remaining} bars until ML predictions begin)")
         
         # Apply filters using stateful calculations
         filter_states = self._apply_filters_stateful(high, low, close)
