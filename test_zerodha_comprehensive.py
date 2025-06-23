@@ -114,8 +114,9 @@ class ComprehensiveMarketTest:
                 
                 # Set token in environment
                 os.environ['KITE_ACCESS_TOKEN'] = access_token
-                self.kite_client = ZerodhaClient()
-                print("✅ Zerodha connection established")
+                # Initialize with caching enabled
+                self.kite_client = ZerodhaClient(use_cache=True, cache_dir="data_cache")
+                print("✅ Zerodha connection established with cache enabled")
                 return True
             else:
                 print("❌ No access token found. Run auth_helper.py first")

@@ -8,6 +8,10 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 from dotenv import load_dotenv
+import pandas as pd
+
+# Import our cache manager
+from .cache_manager import MarketDataCache
 
 # Load environment variables
 load_dotenv()
@@ -36,12 +40,22 @@ class ZerodhaClient:
     Handles authentication and data operations
     """
 
-    def __init__(self):
-        """Initialize Zerodha client with credentials from environment"""
+    def __init__(self, use_cache: bool = True, cache_dir: str = "data_cache"):
+        """
+        Initialize Zerodha client with credentials from environment
+        
+        Args:
+            use_cache: Whether to use local SQLite cache for data
+            cache_dir: Directory to store SQLite database
+        """
         self.api_key = os.getenv('KITE_API_KEY')
         self.api_secret = os.getenv('KITE_API_SECRET')
         self.user_id = os.getenv('KITE_USER_ID')
         self.access_token = os.getenv('KITE_ACCESS_TOKEN')
+        
+        # Initialize cache
+        self.use_cache = use_cache
+        self.cache = MarketDataCache(cache_dir) if use_cache else None
 
         if not KITE_AVAILABLE:
             raise ImportError("KiteConnect not installed. Run: pip install kiteconnect")
@@ -167,7 +181,7 @@ class ZerodhaClient:
 
     def get_historical_data(self, symbol: str, interval: str, days: int = 30) -> List[Dict]:
         """
-        Get historical data for a symbol
+        Get historical data for a symbol with caching support
 
         Args:
             symbol: Trading symbol
@@ -177,6 +191,96 @@ class ZerodhaClient:
         Returns:
             List of candle dictionaries
         """
+        # Calculate date range
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=days)
+        
+        # If cache is enabled, use merge_and_get_data
+        if self.use_cache and self.cache:
+            logger.info(f"Using cache for {symbol} data")
+            
+            # Define fetch function for cache manager
+            def fetch_missing_data(sym: str, start: datetime, end: datetime, intv: str) -> pd.DataFrame:
+                """Fetch data from Zerodha API and convert to DataFrame"""
+                try:
+                    # Get instrument token
+                    if sym not in self.symbol_token_map:
+                        self.get_instruments()
+                    
+                    instrument_token = self.symbol_token_map.get(sym)
+                    if not instrument_token:
+                        logger.error(f"Instrument token not found for {sym}")
+                        return pd.DataFrame()
+                    
+                    # Fetch data in chunks (Zerodha has 2000 bar limit)
+                    all_data = []
+                    current_end = end
+                    
+                    while current_end > start:
+                        # Calculate chunk start (max 2000 bars back)
+                        if intv == "day":
+                            chunk_start = max(start, current_end - timedelta(days=2000))
+                        elif intv == "minute":
+                            chunk_start = max(start, current_end - timedelta(minutes=2000))
+                        elif intv == "3minute":
+                            chunk_start = max(start, current_end - timedelta(minutes=6000))
+                        elif intv == "5minute":
+                            chunk_start = max(start, current_end - timedelta(minutes=10000))
+                        elif intv == "15minute":
+                            chunk_start = max(start, current_end - timedelta(minutes=30000))
+                        elif intv == "30minute":
+                            chunk_start = max(start, current_end - timedelta(minutes=60000))
+                        elif intv == "60minute":
+                            chunk_start = max(start, current_end - timedelta(hours=2000))
+                        else:
+                            chunk_start = max(start, current_end - timedelta(days=100))
+                        
+                        # Fetch chunk
+                        logger.info(f"Fetching chunk from {chunk_start} to {current_end}")
+                        chunk_data = self.kite.historical_data(
+                            instrument_token=instrument_token,
+                            from_date=chunk_start,
+                            to_date=current_end,
+                            interval=intv
+                        )
+                        
+                        if chunk_data:
+                            all_data.extend(chunk_data)
+                            # Move to next chunk
+                            current_end = chunk_start - timedelta(seconds=1)
+                        else:
+                            break
+                        
+                        # Add small delay to respect rate limits
+                        time.sleep(0.3)
+                    
+                    # Convert to DataFrame
+                    if all_data:
+                        df = pd.DataFrame(all_data)
+                        df['date'] = pd.to_datetime(df['date'])
+                        return df
+                    
+                    return pd.DataFrame()
+                    
+                except Exception as e:
+                    logger.error(f"Failed to fetch data: {str(e)}")
+                    return pd.DataFrame()
+            
+            # Get data from cache (will fetch missing data automatically)
+            df = self.cache.merge_and_get_data(
+                symbol=symbol,
+                from_date=from_date,
+                to_date=to_date,
+                interval=interval,
+                fetch_function=fetch_missing_data
+            )
+            
+            # Convert DataFrame back to list of dicts for compatibility
+            if not df.empty:
+                return df.to_dict('records')
+            return []
+        
+        # Original implementation without cache
         try:
             # Get instrument token
             if symbol not in self.symbol_token_map:
@@ -186,10 +290,6 @@ class ZerodhaClient:
             if not instrument_token:
                 logger.error(f"Instrument token not found for {symbol}")
                 return []
-
-            # Calculate date range
-            to_date = datetime.now()
-            from_date = to_date - timedelta(days=days)
 
             # Fetch historical data
             data = self.kite.historical_data(
@@ -425,3 +525,19 @@ class ZerodhaClient:
         print("\n" + "=" * 60)
         print("\nTip: Run this periodically to monitor your API status")
         print("=" * 60)
+    
+    def get_cache_info(self) -> pd.DataFrame:
+        """Get information about cached data"""
+        if self.cache:
+            return self.cache.get_cache_info()
+        else:
+            logger.warning("Cache is not enabled")
+            return pd.DataFrame()
+    
+    def clear_cache(self, symbol: Optional[str] = None, interval: Optional[str] = None):
+        """Clear cached data for a symbol or all data"""
+        if self.cache:
+            self.cache.clear_cache(symbol, interval)
+            logger.info(f"Cache cleared for symbol={symbol}, interval={interval}")
+        else:
+            logger.warning("Cache is not enabled")
