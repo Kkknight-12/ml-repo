@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import json
 from typing import Dict, List, Tuple, Optional
+import pytz  # For timezone handling
 
 # Core imports
 from config.settings import TradingConfig
@@ -127,18 +128,37 @@ class ComprehensiveMarketTest:
             print(f"❌ Zerodha error: {str(e)}")
             return False
     
-    def fetch_historical_data(self, symbol: str, days: int = 3000) -> Optional[pd.DataFrame]:
+    def fetch_historical_data(self, symbol: str, days: int = 3650, 
+                            from_date: Optional[datetime] = None, 
+                            to_date: Optional[datetime] = None) -> Optional[pd.DataFrame]:
         """
         Fetch historical data from Zerodha
-        3000 days = ~8.2 years of calendar days (to get 3000 trading days)
+        
+        Args:
+            symbol: Stock symbol
+            days: Number of days back from today (used if from_date/to_date not provided)
+            from_date: Specific start date (overrides days parameter)
+            to_date: Specific end date (defaults to today if not provided)
         """
         try:
-            # For 3000 trading days, we need approximately 4200 calendar days
-            # (accounting for weekends and holidays)
-            to_date = datetime.now()
-            from_date = to_date - timedelta(days=4200)  # ~11.5 years to ensure we get 3000 bars
-            
-            print(f"\n📊 Fetching {symbol} from {from_date.date()} to {to_date.date()}")
+            # If specific dates provided, use them
+            if from_date and to_date:
+                print(f"\n📊 Fetching {symbol} from {from_date.date()} to {to_date.date()}")
+                actual_days = (to_date - from_date).days
+                print(f"   (Approximately {actual_days/365:.1f} years of data)")
+            else:
+                # Otherwise use days parameter
+                if to_date is None:
+                    to_date = datetime.now()
+                # Ensure from_date has same timezone awareness as to_date
+                if to_date.tzinfo is not None:
+                    # to_date is timezone-aware, calculate from_date with same timezone
+                    from_date = to_date - timedelta(days=days)
+                else:
+                    # to_date is timezone-naive
+                    from_date = to_date - timedelta(days=days)
+                print(f"\n📊 Fetching {symbol} from {from_date.date()} to {to_date.date()}")
+                print(f"   (Approximately {days/365:.1f} years of data)")
             
             # Get instrument token
             self.kite_client.get_instruments("NSE")
@@ -149,85 +169,82 @@ class ComprehensiveMarketTest:
             
             instrument_token = self.kite_client.symbol_token_map[symbol]
             
-            # Fetch data in chunks to avoid rate limits
-            # Zerodha has a limit of 2000 candles per request
-            all_data = []
-            chunk_size = 2000  # Maximum bars per request
+            # For specific date ranges, we need to modify the approach
+            # Since get_historical_data only accepts days from today, 
+            # we'll use it differently for the cache test
             
-            # We need to fetch in reverse chronological order
-            current_to = to_date
-            total_bars_needed = 3000
-            bars_fetched = 0
-            
-            print(f"  📦 Fetching in chunks (max {chunk_size} bars per request)...")
-            
-            # Zerodha's actual limit is 2000 days for the date range, not bars
-            # For daily candles, we need to limit date range to < 2000 days
-            max_days_per_request = 1999  # Stay under 2000 day limit
-            
-            while bars_fetched < total_bars_needed and current_to > from_date:
-                # Calculate date range for this chunk
-                # Use max_days_per_request to stay within Zerodha's limit
-                current_from = current_to - timedelta(days=max_days_per_request)
+            if from_date and to_date and from_date != to_date - timedelta(days=days):
+                # Specific date range requested - calculate days from today
+                # Handle timezone-aware dates properly
+                now = datetime.now()
+                if from_date.tzinfo is not None:
+                    # from_date is timezone-aware, make now timezone-aware too
+                    now = datetime.now(from_date.tzinfo)
+                days_from_today = (now - from_date).days
                 
-                # Don't go before our overall from_date
-                if current_from < from_date:
-                    current_from = from_date
+                print(f"  Using cache-enabled data fetching...")
+                print(f"  Requesting {days_from_today} days from today to cover the range")
                 
-                # Calculate actual days in this range
-                days_in_range = (current_to - current_from).days
+                # This will fetch from cache if available, or from API if not
+                data = self.kite_client.get_historical_data(
+                    symbol=symbol,
+                    interval="day",
+                    days=days_from_today
+                )
                 
-                print(f"  🔄 Fetching chunk: {current_from.date()} to {current_to.date()} ({days_in_range} days)")
-                
-                try:
-                    chunk_data = self.kite_client.kite.historical_data(
-                        instrument_token=instrument_token,
-                        from_date=current_from.strftime("%Y-%m-%d"),
-                        to_date=current_to.strftime("%Y-%m-%d"),
-                        interval="day"
-                    )
+                # Filter to our specific date range
+                if data:
+                    df = pd.DataFrame(data)
+                    df['date'] = pd.to_datetime(df['date'])
                     
-                    if chunk_data:
-                        # Prepend to maintain chronological order
-                        all_data = chunk_data + all_data
-                        bars_fetched += len(chunk_data)
-                        print(f"     ✅ Got {len(chunk_data)} bars (total: {bars_fetched})")
-                        
-                        # If we have enough bars, stop
-                        if bars_fetched >= total_bars_needed:
-                            print(f"     ✅ Reached target of {total_bars_needed} bars")
-                            break
-                        
-                        # If we got very few bars, we might be at the start of data
-                        if len(chunk_data) < 100 and days_in_range > 500:
-                            print(f"     ⚠️ Received fewer bars than expected, might be at data start")
-                            break
+                    # Make sure both date columns are timezone-aware or both are naive
+                    # If df['date'] has timezone info, keep it; otherwise make from_date/to_date naive
+                    if df['date'].dt.tz is not None:
+                        # DataFrame dates are timezone-aware, our dates should be too (already are)
+                        df = df[(df['date'] >= from_date) & (df['date'] <= to_date)]
                     else:
-                        print(f"     ⚠️ No data received for this chunk")
+                        # DataFrame dates are timezone-naive, make our dates naive too
+                        from_date_naive = from_date.replace(tzinfo=None)
+                        to_date_naive = to_date.replace(tzinfo=None)
+                        df = df[(df['date'] >= from_date_naive) & (df['date'] <= to_date_naive)]
                     
-                    # Move to next chunk (with 1 day overlap to ensure continuity)
-                    current_to = current_from
-                    
-                    # Small delay to avoid rate limiting
-                    import time
-                    time.sleep(0.5)
-                    
-                except Exception as e:
-                    print(f"     ❌ Error fetching chunk: {str(e)}")
-                    # Try with smaller chunk if we hit a limit
-                    if "exceeds max limit" in str(e):
-                        max_days_per_request = int(max_days_per_request * 0.8)
-                        print(f"     🔧 Reducing chunk size to {max_days_per_request} days")
-                        continue
-                    break
+                    df = df.sort_values('date').reset_index(drop=True)
+                    print(f"✅ Fetched {len(df)} days for {symbol} in range {from_date.date()} to {to_date.date()}")
+                else:
+                    df = None
+            else:
+                # Normal case - just fetch last N days
+                print(f"  Using cache-enabled data fetching...")
+                data = self.kite_client.get_historical_data(
+                    symbol=symbol,
+                    interval="day",
+                    days=days
+                )
+                
+                if data:
+                    df = pd.DataFrame(data)
+                    df = df.sort_values('date').reset_index(drop=True)
+                    print(f"✅ Fetched {len(df)} days for {symbol}")
+                else:
+                    df = None
             
-            if all_data:
-                df = pd.DataFrame(all_data)
-                df = df.sort_values('date').reset_index(drop=True)
-                print(f"✅ Fetched {len(df)} days for {symbol}")
+            if df is not None and len(df) > 0:
                 
                 # Data quality check
                 self._check_data_quality(df, symbol)
+                
+                # Show cache info if caching is enabled
+                if hasattr(self.kite_client, 'cache') and self.kite_client.cache:
+                    print(f"\n📦 Cache Status:")
+                    cache_info = self.kite_client.get_cache_info()
+                    if not cache_info.empty:
+                        symbol_cache = cache_info[cache_info['symbol'] == symbol]
+                        if not symbol_cache.empty:
+                            for idx, row in symbol_cache.iterrows():
+                                print(f"   {row['symbol']} ({row['interval']}): {row['total_records']} records")
+                                print(f"   Date range: {row['first_date']} to {row['last_date']}")
+                    else:
+                        print("   Cache is empty")
                 
                 return df
             else:
@@ -1158,14 +1175,56 @@ class ComprehensiveMarketTest:
 def main():
     """Main entry point"""
     
-    # Test ICICIBANK with 3000 daily bars
+    # Test ICICIBANK with specific date ranges
     symbols = ['ICICIBANK']
     
     # Create and run test
     tester = ComprehensiveMarketTest()
-    tester.run_comprehensive_test(symbols)
     
-    print("\n✅ Comprehensive test complete!")
+    # Initialize Zerodha first
+    if not tester.initialize_zerodha():
+        print("\n❌ Cannot proceed without Zerodha connection")
+        return
+    
+    # Test cache merging with ICICIBANK
+    print("\n" + "="*70)
+    print("📊 TESTING CACHE MERGING WITH ICICIBANK")
+    print("="*70)
+    
+    # Fetch recent data (2015-2024) and run full ML test with Pine Script comparison
+    # Use yesterday as end date to avoid API issues with current/future dates
+    ist = pytz.timezone('Asia/Kolkata')
+    yesterday = datetime.now(ist) - timedelta(days=1)
+    from_date = ist.localize(datetime(2000, 1, 26))
+    to_date = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    print(f"\n1️⃣ Fetching recent period: {from_date.date()} to {to_date.date()}")
+    
+    # Show cache status before fetch
+    print("\n📦 Cache status before fetch:")
+    cache_info_before = tester.kite_client.get_cache_info()
+    if not cache_info_before.empty:
+        print(cache_info_before[['symbol', 'interval', 'first_date', 'last_date', 'total_records']])
+    
+    # Fetch the data
+    df = tester.fetch_historical_data('ICICIBANK', from_date=from_date, to_date=to_date)
+    
+    if df is not None:
+        print(f"✅ Fetched {len(df)} bars for recent period")
+        
+        # Show cache status after fetch
+        print("\n📦 Cache status after fetch:")
+        cache_info_after = tester.kite_client.get_cache_info()
+        if not cache_info_after.empty:
+            print(cache_info_after[['symbol', 'interval', 'first_date', 'last_date', 'total_records']])
+        
+        # Run the comprehensive ML test with Pine Script comparison
+        print("\n2️⃣ Running comprehensive ML test with Pine Script comparison...")
+        tester.run_comprehensive_test(symbols)
+    else:
+        print("❌ Failed to fetch data")
+    
+    print("\n✅ Test complete!")
 
 
 if __name__ == "__main__":

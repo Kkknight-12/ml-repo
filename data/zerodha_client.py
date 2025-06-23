@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 from dotenv import load_dotenv
 import pandas as pd
+import pytz
 
 # Import our cache manager
 from .cache_manager import MarketDataCache
@@ -237,10 +238,12 @@ class ZerodhaClient:
                         
                         # Fetch chunk
                         logger.info(f"Fetching chunk from {chunk_start} to {current_end}")
+                        
+                        # Convert datetime to string format expected by Zerodha API
                         chunk_data = self.kite.historical_data(
                             instrument_token=instrument_token,
-                            from_date=chunk_start,
-                            to_date=current_end,
+                            from_date=chunk_start.strftime("%Y-%m-%d"),
+                            to_date=current_end.strftime("%Y-%m-%d"),
                             interval=intv
                         )
                         
@@ -258,6 +261,10 @@ class ZerodhaClient:
                     if all_data:
                         df = pd.DataFrame(all_data)
                         df['date'] = pd.to_datetime(df['date'])
+                        # Make dates timezone-aware to match cached data (IST)
+                        if df['date'].dt.tz is None:
+                            ist = pytz.timezone('Asia/Kolkata')
+                            df['date'] = df['date'].dt.tz_localize(ist)
                         return df
                     
                     return pd.DataFrame()

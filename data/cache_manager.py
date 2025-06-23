@@ -129,14 +129,18 @@ class MarketDataCache:
             data_to_insert['symbol'] = symbol
             data_to_insert['interval'] = interval
             
-            # Use REPLACE to handle duplicates (updates existing records)
-            data_to_insert.to_sql(
-                'market_data',
-                conn,
-                if_exists='append',
-                index=False,
-                method='replace'  # This handles duplicates
-            )
+            # Insert data, replacing duplicates
+            # Convert date to string format for SQLite
+            data_to_insert['date'] = data_to_insert['date'].astype(str)
+            
+            # Insert with REPLACE to handle duplicates
+            for _, row in data_to_insert.iterrows():
+                conn.execute("""
+                    INSERT OR REPLACE INTO market_data 
+                    (symbol, date, interval, open, high, low, close, volume)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (row['symbol'], row['date'], row['interval'], 
+                      row['open'], row['high'], row['low'], row['close'], row['volume']))
             
             # Update metadata
             self._update_metadata(conn, symbol, interval)
@@ -162,6 +166,17 @@ class MarketDataCache:
         cached_last_date = metadata['last_date']
         
         missing_ranges = []
+        
+        # Ensure both dates have the same timezone awareness for comparison
+        # If cached dates have timezone info, ensure from_date/to_date also have it
+        if cached_first_date.tzinfo is not None and from_date.tzinfo is None:
+            # Make from_date/to_date timezone-aware (assume same timezone as cached data)
+            from_date = from_date.replace(tzinfo=cached_first_date.tzinfo)
+            to_date = to_date.replace(tzinfo=cached_first_date.tzinfo)
+        elif cached_first_date.tzinfo is None and from_date.tzinfo is not None:
+            # Make from_date/to_date timezone-naive
+            from_date = from_date.replace(tzinfo=None)
+            to_date = to_date.replace(tzinfo=None)
         
         # Check if we need data before cached range
         if from_date < cached_first_date:
@@ -199,6 +214,7 @@ class MarketDataCache:
         
         if not missing_ranges:
             # All data is cached
+            logger.info(f"All data for {symbol} is already cached - no API calls needed")
             return cached_data if cached_data is not None else pd.DataFrame()
         
         # Fetch missing data
@@ -207,8 +223,11 @@ class MarketDataCache:
             logger.info(f"Fetching missing data for {symbol} from {start_date.date()} to {end_date.date()}")
             new_data = fetch_function(symbol, start_date, end_date, interval)
             if not new_data.empty:
+                logger.info(f"Received {len(new_data)} records from API")
                 all_new_data.append(new_data)
                 self.save_data(symbol, new_data, interval)
+            else:
+                logger.warning(f"No data received from API for {symbol} {start_date.date()} to {end_date.date()}")
         
         # Combine all data
         if all_new_data:
