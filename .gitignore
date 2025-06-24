@@ -173,3 +173,13 @@ config/*.local.py
 # Generated files
 *.pyc
 compiled/
+
+# Archive folders (cleanup)
+archive/
+
+# Pine Script exports and analysis outputs
+pine_script_comparison_*.csv
+mismatches_*.csv
+*_analysis_*.csv
+*_debug_*.csv
+*_test_*.csv
