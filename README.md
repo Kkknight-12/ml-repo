@@ -1,5 +1,7 @@
 # Lorentzian Classification - Python Implementation
 
+> **📌 For developers continuing this project: Start with [NEXT_CHAT_CONTEXT.md](NEXT_CHAT_CONTEXT.md) for complete context!**
+
 A Python implementation of the popular Pine Script Lorentzian Classification trading strategy with machine learning capabilities.
 
 ## 🚀 Overview
