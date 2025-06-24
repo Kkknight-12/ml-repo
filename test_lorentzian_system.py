@@ -399,8 +399,66 @@ class LorentzianSystemTest:
         
         return filename
     
-    def calculate_performance_stats(self, results: Dict) -> Dict:
-        """Calculate performance statistics"""
+    def export_detailed_trades_csv(self, performance: Dict, filename: Optional[str] = None):
+        """Export detailed trade data with capital calculations to CSV"""
+        import csv
+        
+        if not performance or 'trades' not in performance:
+            print("No trade data to export")
+            return None
+        
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"detailed_trades_ICICIBANK_{timestamp}.csv"
+        
+        # Write detailed trade data
+        with open(filename, 'w', newline='') as f:
+            fieldnames = [
+                'entry_date', 'exit_date', 'type', 'entry_price', 'exit_price',
+                'shares', 'position_value', 'pnl_amount', 'pnl_pct', 
+                'capital_after_trade', 'bars_held'
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for trade in performance['trades']:
+                row = {
+                    'entry_date': trade['entry_date'].strftime('%Y-%m-%d'),
+                    'exit_date': trade['exit_date'].strftime('%Y-%m-%d'),
+                    'type': trade['type'],
+                    'entry_price': f"{trade['entry_price']:.2f}",
+                    'exit_price': f"{trade['exit_price']:.2f}",
+                    'shares': trade['shares'],
+                    'position_value': f"{trade['position_value']:.2f}",
+                    'pnl_amount': f"{trade['pnl_amount']:.2f}",
+                    'pnl_pct': f"{trade['pnl_pct']:.2f}",
+                    'capital_after_trade': f"{trade['capital_after_trade']:.2f}",
+                    'bars_held': trade['bars_held']
+                }
+                writer.writerow(row)
+        
+        print(f"💾 Exported detailed trade data to {filename}")
+        
+        # Also create a summary
+        summary_filename = filename.replace('detailed_trades', 'trade_summary')
+        with open(summary_filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Trading Summary for ICICIBANK'])
+            writer.writerow([])
+            writer.writerow(['Initial Capital', f"₹{performance['initial_capital']:,.2f}"])
+            writer.writerow(['Final Capital', f"₹{performance['final_capital']:,.2f}"])
+            writer.writerow(['Total P&L', f"₹{performance['total_pnl']:,.2f}"])
+            writer.writerow(['Total Return', f"{((performance['final_capital'] - performance['initial_capital']) / performance['initial_capital'] * 100):.2f}%"])
+            writer.writerow(['Total Trades', performance['total_trades']])
+            writer.writerow(['Win Rate', f"{performance['win_rate']:.1f}%"])
+            writer.writerow(['Profit Factor', f"{performance['profit_factor']:.2f}"])
+        
+        print(f"💾 Exported trade summary to {summary_filename}")
+        
+        return filename
+    
+    def calculate_performance_stats(self, results: Dict, initial_capital: float = 100000) -> Dict:
+        """Calculate performance statistics with capital tracking"""
         print("\n" + "="*70)
         print("📈 PERFORMANCE ANALYSIS")
         print("="*70)
@@ -411,6 +469,10 @@ class LorentzianSystemTest:
         entries = results['entries'].copy()
         exits = results['exits'].copy()
         trades = []
+        
+        # Track capital
+        current_capital = initial_capital
+        capital_history = [initial_capital]
         
         for entry in entries:
             # Find next matching exit
@@ -424,11 +486,24 @@ class LorentzianSystemTest:
                         else:  # SHORT
                             pnl_pct = ((entry['price'] - exit['price']) / entry['price']) * 100
                         
+                        # Calculate shares and actual P&L
+                        shares_bought = int(current_capital * 0.95 / entry['price'])  # Use 95% of capital
+                        position_value = shares_bought * entry['price']
+                        pnl_amount = position_value * (pnl_pct / 100)
+                        current_capital += pnl_amount
+                        capital_history.append(current_capital)
+                        
                         trades.append({
                             'entry_date': entry['date'],
                             'exit_date': exit['date'],
                             'type': entry['type'],
+                            'entry_price': entry['price'],
+                            'exit_price': exit['price'],
+                            'shares': shares_bought,
+                            'position_value': position_value,
                             'pnl_pct': pnl_pct,
+                            'pnl_amount': pnl_amount,
+                            'capital_after_trade': current_capital,
                             'bars_held': exit['bar'] - entry['bar']
                         })
                         
@@ -456,14 +531,27 @@ class LorentzianSystemTest:
             total_losses = abs(sum(t['pnl_pct'] for t in losing_trades)) if losing_trades else 0
             stats['profit_factor'] = total_wins / total_losses if total_losses > 0 else float('inf') if total_wins > 0 else 0
             
+            # Calculate final metrics
+            total_pnl = current_capital - initial_capital
+            total_return_pct = (total_pnl / initial_capital) * 100
+            
+            stats['initial_capital'] = initial_capital
+            stats['final_capital'] = current_capital
+            stats['total_pnl'] = total_pnl
+            stats['trades'] = trades
+            
             # Print statistics
+            print(f"\n💰 Capital Summary:")
+            print(f"   Initial capital: ₹{initial_capital:,.2f}")
+            print(f"   Final capital: ₹{current_capital:,.2f}")
+            print(f"   Total P&L: ₹{total_pnl:,.2f} ({total_return_pct:+.2f}%)")
+            
             print(f"\n📊 Trade Statistics:")
             print(f"   Total completed trades: {stats['total_trades']}")
             print(f"   Win rate: {stats['win_rate']:.1f}%")
             print(f"   Average win: +{stats['avg_win']:.2f}%")
             print(f"   Average loss: {stats['avg_loss']:.2f}%")
             print(f"   Profit factor: {stats['profit_factor']:.2f}")
-            print(f"   Total return: {stats['total_return']:.2f}%")
             print(f"   Average bars held: {stats['avg_bars_held']:.0f}")
             
             # Show last 5 trades
@@ -522,6 +610,10 @@ def main():
     
     # Export signals
     csv_file = tester.export_signals_csv(results)
+    
+    # Export detailed trade data
+    if performance:
+        tester.export_detailed_trades_csv(performance)
     
     # Summary
     print("\n" + "="*70)
