@@ -12,6 +12,10 @@ from data.data_types import (
     MLModel, Filter, FilterSettings
 )
 from core.pine_functions import nz, na
+from config.memory_limits import (
+    MAX_TRAINING_ARRAY_SIZE, MAX_PREDICTIONS_ARRAY_SIZE,
+    should_cleanup, calculate_items_to_remove
+)
 
 
 class LorentzianKNNFixedCorrected:
@@ -121,6 +125,14 @@ class LorentzianKNNFixedCorrected:
 
         # Add to training array
         self.y_train_array.append(y_train_series)
+        
+        # Check memory limit
+        if len(self.y_train_array) > MAX_TRAINING_ARRAY_SIZE:
+            # Remove oldest 10% of training data
+            items_to_remove = calculate_items_to_remove(len(self.y_train_array))
+            if items_to_remove > 0:
+                # Remove from beginning (oldest data)
+                self.y_train_array = self.y_train_array[items_to_remove:]
 
     def predict(self, feature_series: FeatureSeries,
                 feature_arrays: FeatureArrays, bar_index: int) -> float:
@@ -178,6 +190,14 @@ class LorentzianKNNFixedCorrected:
                     # Remove oldest neighbor (FIFO)
                     self.distances.pop(0)
                     self.predictions.pop(0)
+                
+                # Additional safety check for predictions array
+                if len(self.predictions) > MAX_PREDICTIONS_ARRAY_SIZE:
+                    # This should never happen with typical neighbors_count=8
+                    # But we add it as a safety measure
+                    excess = len(self.predictions) - MAX_PREDICTIONS_ARRAY_SIZE
+                    self.predictions = self.predictions[excess:]
+                    self.distances = self.distances[excess:]
 
         # Track maximum neighbors seen
         current_neighbor_count = len(self.predictions)

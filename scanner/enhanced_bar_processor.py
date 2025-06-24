@@ -27,6 +27,11 @@ from ml.lorentzian_knn_fixed_corrected import LorentzianKNNFixedCorrected
 from scanner.signal_generator_enhanced import SignalGenerator
 from core.na_handling import validate_ohlcv
 from utils.risk_management import calculate_trade_levels
+from config.memory_limits import (
+    MAX_FEATURE_ARRAY_SIZE, MAX_BAR_HISTORY_SIZE,
+    MAX_SIGNAL_HISTORY_SIZE, MAX_ENTRY_HISTORY_SIZE,
+    should_cleanup, calculate_items_to_remove
+)
 
 # BarResult dataclass definition (moved from bar_processor.py)
 @dataclass
@@ -101,7 +106,9 @@ class EnhancedBarProcessor:
         self.feature_arrays = FeatureArrays()
 
         # Historical data for calculations (still needed for some operations)
-        self.bars = BarData(max_bars=config.max_bars_back + 100)
+        # Use memory limit to prevent excessive memory usage
+        max_bars = min(config.max_bars_back + 100, MAX_BAR_HISTORY_SIZE)
+        self.bars = BarData(max_bars=max_bars)
 
         # State tracking (for stateless signal generation)
         self.signal_history: List[int] = []
@@ -264,11 +271,11 @@ class EnhancedBarProcessor:
         self.signal_history.insert(0, signal)
         self.entry_history.insert(0, (start_long, start_short))
 
-        # Limit history size
-        if len(self.signal_history) > 10:
-            self.signal_history.pop()
-        if len(self.entry_history) > 10:
-            self.entry_history.pop()
+        # Limit history size using configured limits
+        if len(self.signal_history) > MAX_SIGNAL_HISTORY_SIZE:
+            self.signal_history = self.signal_history[:MAX_SIGNAL_HISTORY_SIZE]
+        if len(self.entry_history) > MAX_ENTRY_HISTORY_SIZE:
+            self.entry_history = self.entry_history[:MAX_ENTRY_HISTORY_SIZE]
         
         # Calculate SL/TP if we have a new entry signal
         stop_loss = None
@@ -360,14 +367,20 @@ class EnhancedBarProcessor:
         self.feature_arrays.f4.append(feature_series.f4)
         self.feature_arrays.f5.append(feature_series.f5)
 
-        # Limit size - remove from beginning if too large
-        max_size = self.settings.max_bars_back
-        if len(self.feature_arrays.f1) > max_size:
-            self.feature_arrays.f1.pop(0)
-            self.feature_arrays.f2.pop(0)
-            self.feature_arrays.f3.pop(0)
-            self.feature_arrays.f4.pop(0)
-            self.feature_arrays.f5.pop(0)
+        # Limit size - use configured memory limit
+        max_size = min(self.settings.max_bars_back, MAX_FEATURE_ARRAY_SIZE)
+        
+        # Check if cleanup needed
+        if should_cleanup(len(self.feature_arrays.f1), max_size):
+            # Remove oldest 10% of data
+            items_to_remove = calculate_items_to_remove(len(self.feature_arrays.f1))
+            if items_to_remove > 0:
+                # Remove from beginning (oldest data)
+                self.feature_arrays.f1 = self.feature_arrays.f1[items_to_remove:]
+                self.feature_arrays.f2 = self.feature_arrays.f2[items_to_remove:]
+                self.feature_arrays.f3 = self.feature_arrays.f3[items_to_remove:]
+                self.feature_arrays.f4 = self.feature_arrays.f4[items_to_remove:]
+                self.feature_arrays.f5 = self.feature_arrays.f5[items_to_remove:]
 
     def _apply_filters_stateful(self, high: float, low: float, close: float) -> Dict[str, bool]:
         """Apply filters using stateful calculations"""
