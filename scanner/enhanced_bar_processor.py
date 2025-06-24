@@ -23,8 +23,8 @@ from core.enhanced_indicators import (
 )
 from core.enhanced_ml_extensions import enhanced_regime_filter, enhanced_filter_adx, enhanced_filter_volatility
 from core.kernel_functions import is_kernel_bullish, is_kernel_bearish, get_kernel_crossovers
-from ml.lorentzian_knn_fixed import LorentzianKNNFixed
-from scanner.signal_generator import SignalGenerator
+from ml.lorentzian_knn_fixed_corrected import LorentzianKNNFixedCorrected
+from scanner.signal_generator_enhanced import SignalGenerator
 from core.na_handling import validate_ohlcv
 from utils.risk_management import calculate_trade_levels
 
@@ -94,7 +94,7 @@ class EnhancedBarProcessor:
 
         # Initialize components
         self.label = Label()
-        self.ml_model = LorentzianKNNFixed(self.settings, self.label)
+        self.ml_model = LorentzianKNNFixedCorrected(self.settings, self.label)
         self.signal_generator = SignalGenerator(self.label)
 
         # Feature arrays (historical storage)
@@ -399,7 +399,8 @@ class EnhancedBarProcessor:
         return {
             "volatility": volatility,
             "regime": regime,
-            "adx": adx
+            "adx": adx,
+            "kernel": True  # Kernel state will be checked separately in signal generation
         }
 
     def _calculate_ema_trend_stateful(self, close: float) -> Tuple[bool, bool]:

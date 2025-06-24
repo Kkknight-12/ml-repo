@@ -2,8 +2,9 @@
 Machine Learning module - Lorentzian Classification
 """
 
-from .lorentzian_knn_fixed import LorentzianKNNFixed
+from .lorentzian_knn_fixed_corrected import LorentzianKNNFixedCorrected
 # Alias for backward compatibility
-LorentzianKNN = LorentzianKNNFixed
+LorentzianKNN = LorentzianKNNFixedCorrected
+LorentzianKNNFixed = LorentzianKNNFixedCorrected
 
-__all__ = ['LorentzianKNN', 'LorentzianKNNFixed']
+__all__ = ['LorentzianKNN', 'LorentzianKNNFixed', 'LorentzianKNNFixedCorrected']

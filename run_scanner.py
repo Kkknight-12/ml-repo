@@ -15,7 +15,7 @@ try:
     # Phase 1 imports
     from config.settings import TradingConfig
     from scanner import BarProcessor
-    from ml.lorentzian_knn import LorentzianKNN
+    from ml.lorentzian_knn_fixed_corrected import LorentzianKNNFixedCorrected
 
     print("✅ Phase 1 components imported successfully")
 except ImportError as e:
