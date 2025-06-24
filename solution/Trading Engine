@@ -1,0 +1,250 @@
+# Pine Script and TradingView Trading Engine: Advanced Technical Guide
+
+Pine Script's trading engine powers millions of automated strategies on TradingView, yet its intricate position tracking, order management, and execution simulation mechanisms remain poorly understood by most developers. This comprehensive technical guide reveals how `strategy.position_size` tracks positions internally, how the pyramiding parameter controls entry behavior, when `calc_on_order_fills` transforms execution timing, and exactly how TradingView's Broker Emulator simulates real-world trading conditions—providing the deep technical knowledge needed to build robust, realistic trading strategies.
+
+## How Pine Script tracks positions with strategy.position_size
+
+Pine Script's `strategy.position_size` variable serves as the cornerstone of position management, returning the current market position as a floating-point number. **Positive values indicate long positions**, **negative values indicate short positions**, and **zero means no position** (flat). This seemingly simple variable conceals sophisticated timing behaviors that can make or break a strategy.
+
+The variable updates whenever a script calculation occurs, but the timing differs dramatically between backtesting and real-time execution. During historical backtesting, `strategy.position_size` updates at most four times per bar when `calc_on_order_fills` is enabled, but typically just once at bar close. In real-time trading with `calc_on_every_tick=true`, it can update with every price change, creating a fundamental discrepancy that developers must account for.
+
+One critical limitation shapes all position management logic: **Pine Script strategies cannot hold simultaneous long and short positions**. When `strategy.entry()` is called in the opposite direction of an existing position, the system automatically closes the current position before opening the new one. This means a sequence like `strategy.entry("Long", strategy.long, qty=10)` followed by `strategy.entry("Short", strategy.short, qty=5)` results in a net 5-unit short position, not two separate positions.
+
+### Essential position detection patterns
+
+Detecting position changes requires comparing the current and previous values of `strategy.position_size`:
+
+```pinescript
+// Core position state functions
+IsLong() => strategy.position_size > 0
+IsShort() => strategy.position_size < 0
+IsFlat() => strategy.position_size == 0
+
+// Transition detection
+longFromFlat = strategy.position_size[1] == 0 and strategy.position_size > 0
+shortFromLong = strategy.position_size[1] > 0 and strategy.position_size < 0
+positionChanged = strategy.position_size != strategy.position_size[1]
+```
+
+A common pitfall occurs when positions open and close within the same bar—`strategy.position_size` may never register the trade. In these cases, monitoring `strategy.closedtrades` provides more reliable detection of completed trades. The variable also exhibits precision issues with very small positions in cryptocurrency markets, requiring developers to implement tolerance checks rather than exact equality comparisons.
+
+### Risk-based position sizing implementation
+
+Professional strategies often calculate position sizes based on account risk rather than fixed quantities:
+
+```pinescript
+//@version=5
+strategy("Risk-Based Sizing", overlay=true)
+
+riskPercentage = input.float(1.0, "Risk %") / 100
+accountSize = strategy.equity
+
+longCondition = ta.crossover(ta.sma(close, 20), ta.sma(close, 50))
+stopLoss = ta.lowest(low, 10)[1]
+
+if longCondition and strategy.position_size == 0
+    riskAmount = accountSize * riskPercentage
+    stopDistance = close - stopLoss
+    positionSize = riskAmount / stopDistance
+    strategy.entry("Long", strategy.long, qty=positionSize)
+```
+
+The interaction between `strategy.position_size` and other strategy functions creates complex behaviors. When `strategy.entry()` reverses a position, the final position size equals the new order's quantity parameter. With `strategy.exit()`, the position size decreases toward zero as conditional orders fill. Understanding these mechanics prevents unexpected position sizes and enables sophisticated multi-level exit strategies.
+
+## Pyramiding: controlling multiple entries in Pine Script
+
+The pyramiding parameter fundamentally controls whether strategies can scale into positions or remain limited to single entries. Despite widespread confusion about its default value—with sources claiming both 0 and 1—**functionally both values produce identical behavior**, allowing only one entry in the same direction. The true power of pyramiding emerges when set above 1, enabling sophisticated position scaling strategies.
+
+Pyramiding operates through a two-phase validation system. During order generation, TradingView checks if the current number of entries (`strategy.opentrades`) has reached the pyramiding limit. If not, the order proceeds to the execution phase where it fills based on market conditions. This separation between generation and execution creates timing issues that catch many developers off guard.
+
+### The critical function difference
+
+A fundamental distinction exists between `strategy.entry()` and `strategy.order()` regarding pyramiding enforcement:
+
+```pinescript
+// strategy.entry() - Respects pyramiding limits
+strategy("Demo", pyramiding=3)
+if longSignal
+    strategy.entry("Long", strategy.long)  // Automatically rejected if limit reached
+
+// strategy.order() - Ignores pyramiding completely
+if longSignal
+    strategy.order("Long", strategy.long)  // Executes regardless of current entries
+```
+
+This difference means `strategy.order()` can inadvertently create positions far exceeding intended sizes. Developers using `strategy.order()` must implement manual checking: `if strategy.opentrades < maxPyramiding`.
+
+### Solving the simultaneous order problem
+
+Multiple orders generated in the same calculation can all pass pyramiding validation since they each see the same current entry count. This leads to position sizes exceeding limits when all orders subsequently fill. Three solutions address this issue:
+
+**OCA (One-Cancels-All) groups** ensure only one order from a group fills:
+```pinescript
+strategy.entry("Long1", strategy.long, oca_name="entry", oca_type=strategy.oca.cancel)
+strategy.entry("Long2", strategy.long, oca_name="entry", oca_type=strategy.oca.cancel)
+```
+
+**Mutually exclusive conditions** prevent simultaneous order generation:
+```pinescript
+if longCondition and strategy.opentrades == 0
+    strategy.entry("First", strategy.long)
+else if additionalCondition and strategy.opentrades == 1
+    strategy.entry("Second", strategy.long)
+```
+
+**Sequential entry logic** spaces out order generation across bars:
+```pinescript
+var int lastEntryBar = 0
+if longCondition and bar_index > lastEntryBar + 5  // Minimum 5 bars between entries
+    strategy.entry("Long" + str.tostring(strategy.opentrades + 1), strategy.long)
+    lastEntryBar := bar_index
+```
+
+### Position sizing with pyramiding
+
+A critical misconception about pyramiding involves position sizing. **Pyramiding counts trades, not total position size**. A strategy with `pyramiding=3` could theoretically create entries of 100, 1000, and 10,000 shares, resulting in an 11,100-share position—far exceeding most risk parameters.
+
+Best practice divides the intended maximum position by the pyramiding value:
+```pinescript
+maxPyramiding = 3
+totalIntendedSize = 3000
+sizePerEntry = totalIntendedSize / maxPyramiding  // 1000 shares per entry
+
+strategy("Scaled Entries", pyramiding=3)
+if entryCondition
+    strategy.entry("Long", strategy.long, qty=sizePerEntry)
+```
+
+Optimal pyramiding values depend on strategy type. **Simple swing trading strategies work best with pyramiding=0 or 1**, maintaining clarity and reducing complexity. **Trend-following systems benefit from pyramiding=2-5**, allowing position scaling as trends develop. **Grid trading and DCA strategies may use higher values (5-20)** to implement multiple price levels, though this requires sophisticated risk management to prevent overexposure.
+
+## The calc_on_order_fills parameter: transforming execution timing
+
+The `calc_on_order_fills` parameter fundamentally alters how Pine Script strategies process orders, enabling intrabar calculations immediately after fills rather than waiting for bar closes. This boolean setting, defaulting to `false`, creates one of the most significant behavioral differences between backtesting and live trading.
+
+With `calc_on_order_fills=false`, strategies calculate only when bars close, orders fill at the next bar's open, and execution follows a predictable pattern. Enabling the parameter (`calc_on_order_fills=true`) triggers additional calculations whenever orders fill, allowing strategies to react immediately to entry prices and adjust stops or targets dynamically within the same bar.
+
+### Cascading calculation effects
+
+The most dramatic impact occurs through cascading calculations. Each filled order triggers a new calculation, which can generate additional orders that trigger further calculations:
+
+```pinescript
+//@version=5
+strategy("Cascade Example", calc_on_order_fills=true)
+
+// This can create multiple entries within one bar
+if strategy.position_size == 0
+    strategy.entry("Long1", strategy.long)
+
+// Triggered by calc_on_order_fills after Long1 fills
+if strategy.position_size > 0 and strategy.position_size < 300
+    strategy.entry("Long2", strategy.long)
+
+// Could trigger again after Long2 fills
+if strategy.position_size > 200
+    strategy.exit("Stop", stop=strategy.position_avg_price * 0.98)
+```
+
+This cascading behavior creates performance implications. Backtesting slows significantly as calculations multiply, and resource usage increases exponentially with complex logic. More critically, **historical bars support maximum 4 additional calculations** (at open, high, low, close prices), while **real-time bars can trigger unlimited calculations** with each price update.
+
+### Critical strategy variable limitations
+
+A subtle but crucial limitation affects strategy state variables during intrabar calculations. Variables like `strategy.position_size` and `strategy.closedtrades` don't update reliably during these additional calculations, potentially causing strategies to generate unintended multiple entries:
+
+```pinescript
+// Problematic code with calc_on_order_fills=true
+if longSignal and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    // position_size may still show 0 in next intrabar calculation!
+
+// Solution: Use barstate.isconfirmed
+if longSignal and strategy.position_size == 0 and barstate.isconfirmed
+    strategy.entry("Long", strategy.long)
+```
+
+### Strategic use cases and decision framework
+
+Enable `calc_on_order_fills=true` for strategies requiring immediate reaction to fills: high-frequency trading systems adjusting stops dynamically, multi-timeframe strategies needing quick position adjustments, or algorithms scaling into positions based on entry prices. The setting proves especially valuable on higher timeframes where significant time passes between bar closes.
+
+Avoid the setting for simple strategies with single entry/exit logic, when backtesting accuracy matters more than execution speed, or when pattern recognition might become invalid during intrabar movements. The inherent repainting behavior—where historical and real-time calculations differ—makes careful validation essential.
+
+## Inside TradingView's Broker Emulator
+
+TradingView's Broker Emulator represents one of the most sophisticated retail backtesting engines available, yet its assumptions and limitations profoundly impact strategy development. Understanding its internal mechanics separates profitable live traders from backtesting champions whose strategies fail in real markets.
+
+### The assumption engine: how prices move within bars
+
+Without Bar Magnifier technology, the emulator makes critical assumptions about intrabar price movement. When the high is closer to the open than the low (`|high - open| > |low - open|`), it assumes price traveled: **open → high → low → close**. Otherwise, it assumes: **open → low → high → close**. The emulator then "walks" through these paths tick by tick, checking whether orders can fill at each price level.
+
+This assumption system creates multiple unrealistic scenarios. A limit buy at $100 and limit sell at $102 might both fill on the same bar in backtesting, while real price action might never return to the entry level after reaching the target. Stop-loss orders may appear to dodge wicks that would trigger them in live trading.
+
+### Bar Magnifier: replacing assumptions with data
+
+Bar Magnifier technology revolutionizes backtesting accuracy by using actual lower timeframe data instead of assumptions. A 1-hour chart strategy accesses real 5-minute bars, daily strategies use hourly data, and weekly strategies employ daily bars. This granular data reveals true intrabar price movements, catching entries and exits that assumption-based logic misses or incorrectly allows.
+
+Activating Bar Magnifier requires adding `use_bar_magnifier=true` to the strategy declaration:
+```pinescript
+strategy("Accurate Backtest", use_bar_magnifier=true)
+```
+
+The technology has constraints: Premium+ account requirement, 200,000-bar limit from lower timeframes potentially not covering full chart history, and no ability to simulate true market order intrabar execution timing. Despite limitations, Bar Magnifier remains essential for intraday strategies where precise entry and exit timing determines profitability.
+
+### Order type execution logic
+
+**Market orders** execute at the next available price—the open of the following bar in backtesting or the next tick in real-time. They always incur slippage as configured in strategy settings.
+
+**Limit orders** fill when price reaches or exceeds the limit favorably. Buy limits fill at or below the specified price, sell limits at or above. Importantly, limit orders can fill at better prices than specified and don't incur slippage, though the `backtest_fill_limits_assumption` parameter can require price to exceed limits by specified ticks for more realistic fills.
+
+**Stop orders** trigger when price reaches the stop level unfavorably, then execute as market orders with slippage. Stop-limit orders add complexity through a two-stage process: the stop price activates a limit order, which then requires price to return to the limit level for execution. This realistic behavior means stop-limits may not fill during fast market moves.
+
+### FIFO rules and position management
+
+The emulator strictly enforces First-In-First-Out (FIFO) rules, matching real broker behavior. When multiple entries exist, exits always close the oldest positions first, regardless of which specific entry the exit targets in code:
+
+```pinescript
+strategy.entry("Buy1", strategy.long, 1, limit=100)  // First entry at $100
+strategy.entry("Buy2", strategy.long, 1, limit=98)   // Second entry at $98
+strategy.entry("Buy3", strategy.long, 1, limit=96)   // Third entry at $96
+
+strategy.exit("Exit", "Buy2", profit=200)  // Intends to exit Buy2
+// Reality: Closes Buy1 (first in) due to FIFO rules
+```
+
+This FIFO enforcement affects average price calculations and position management logic. While the visual trade list might show exits targeting specific entries, execution follows chronological order, potentially creating discrepancies between expected and actual behavior.
+
+### Critical limitations versus real trading
+
+**No partial fills**: Real large orders often fill in pieces across multiple price levels. The emulator fills orders completely or not at all, overestimating execution quality for size traders.
+
+**Infinite liquidity assumption**: The emulator assumes any volume can trade at any price level. Real markets have depth limitations causing slippage or preventing fills entirely during thin trading.
+
+**No market impact**: Large orders don't move simulated prices. A 10,000-share market order fills at the exact same price as a 10-share order, ignoring how real orders consume liquidity and move markets.
+
+**No order book simulation**: Without bid-ask spreads, limit orders fill whenever price touches the level. Real trading requires price to trade through the full order queue at that level.
+
+### Building realistic backtests
+
+Creating strategies that perform similarly in backtesting and live trading requires deliberate realism injection:
+
+```pinescript
+//@version=5
+strategy("Realistic Strategy",
+         use_bar_magnifier=true,
+         commission_type=strategy.commission.percent,
+         commission_value=0.05,    // 0.05% commission
+         slippage=3,                // 3 ticks slippage
+         backtest_fill_limits_assumption=2)  // Require 2 ticks through limit
+```
+
+Beyond configuration, code structure matters. Entry signals should use prior bar confirmation (`longCondition[1]`) rather than current bar values. Position sizing must account for commissions and slippage in calculations. Exit logic should avoid assuming perfect fills at exact levels.
+
+The most revealing practice involves testing strategies across different market regimes—bull markets, bear markets, high and low volatility periods, and various liquidity conditions. A strategy profitable only in trending markets with perfect fills will likely fail when market conditions change or real-world frictions apply.
+
+## Synthesis and practical implementation
+
+These four Pine Script components—position tracking, pyramiding control, execution timing, and trade simulation—form an interconnected system requiring holistic understanding. `strategy.position_size` provides real-time position awareness but depends on execution timing controlled by `calc_on_order_fills`. Pyramiding parameters determine position scaling capabilities but interact with the Broker Emulator's order processing logic. Each component's behavior shifts between backtesting and live trading, creating a complex landscape developers must navigate.
+
+Success requires embracing defensive coding practices. Always verify position states before entry, implement reasonable position size limits, use prior bar signals to avoid look-ahead bias, and test extensively with Bar Magnifier enabled. Monitor key metrics beyond simple profit: maximum drawdown, consecutive losses, profit factor, and average trade statistics reveal strategy robustness.
+
+The path from profitable backtest to successful live trading demands progressive validation. Start with historical backtesting using realistic parameters, advance to paper trading for several months, then test with small live positions before scaling to full size. This graduated approach reveals issues that pure backtesting cannot catch—psychological pressures, execution delays, and market microstructure effects.
+
+Pine Script's power lies not in perfect prediction but in systematic execution of well-reasoned strategies. By understanding how position tracking operates, controlling entries through pyramiding, managing execution timing, and simulating trades realistically, developers can create strategies that bridge the treacherous gap between backtesting paradise and live trading reality. The technical mastery of these components, combined with disciplined risk management and continuous adaptation, forms the foundation of successful algorithmic trading on TradingView.
