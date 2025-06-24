@@ -233,6 +233,13 @@ class MarketDataCache:
         if all_new_data:
             new_df = pd.concat(all_new_data, ignore_index=True)
             if cached_data is not None:
+                # Ensure both DataFrames have consistent timezone handling
+                # Convert both to timezone-naive for consistency
+                if pd.api.types.is_datetime64_any_dtype(cached_data['date']):
+                    cached_data['date'] = pd.to_datetime(cached_data['date']).dt.tz_localize(None)
+                if pd.api.types.is_datetime64_any_dtype(new_df['date']):
+                    new_df['date'] = pd.to_datetime(new_df['date']).dt.tz_localize(None)
+                
                 # Merge cached and new data
                 combined = pd.concat([cached_data, new_df], ignore_index=True)
                 # Remove duplicates, keeping last (most recent)

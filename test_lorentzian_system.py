@@ -57,7 +57,7 @@ class LorentzianSystemTest:
             use_dynamic_exits=False
         )
         
-    def fetch_data_from_cache(self, symbol: str = 'ICICIBANK', 
+    def fetch_data_from_cache(self, symbol: str = 'RELIANCE',
                             limit: Optional[int] = None) -> Optional[pd.DataFrame]:
         """
         Fetch data from cache database

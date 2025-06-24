@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Comprehensive Zerodha Test Script for Lorentzian Classification
-Tests ICICIBANK with 3000 daily bars
+Tests stocks with configurable time periods using smart caching
 Follows Pine Script behavior exactly with all bug fixes applied
 """
 import sys
@@ -373,6 +373,7 @@ class ComprehensiveMarketTest:
                 'volatility_passes': 0,
                 'regime_passes': 0,
                 'adx_passes': 0,
+                'kernel_passes': 0,
                 'all_pass': 0
             },
             'bars_processed': 0,
@@ -697,8 +698,10 @@ class ComprehensiveMarketTest:
         
         return output_file
     
-    def compare_with_pinescript(self, python_csv: str, pinescript_csv: str = "archive/data_files/NSE_ICICIBANK, 1D.csv"):
+    def compare_with_pinescript(self, python_csv: str, pinescript_csv: str = None, symbol: str = "ICICIBANK"):
         """Compare Python signals with Pine Script signals"""
+        if pinescript_csv is None:
+            pinescript_csv = f"archive/data_files/NSE_{symbol}, 1D.csv"
         import csv
         from datetime import datetime
         
@@ -1202,7 +1205,7 @@ class ComprehensiveMarketTest:
         
         print("\n" + "="*70)
         print("🚀 COMPREHENSIVE LORENTZIAN CLASSIFICATION TEST")
-        print("📅 Testing ICICIBANK - 3000 Daily Bars")
+        print(f"📅 Testing {', '.join(symbols)}")
         print("="*70)
         
         # Initialize Zerodha
@@ -1248,7 +1251,8 @@ class ComprehensiveMarketTest:
                     if 'exported_csv' in results and results['exported_csv']:
                         comparison = self.compare_with_pinescript(
                             results['exported_csv'],
-                            "archive/data_files/NSE_ICICIBANK, 1D.csv"
+                            None,  # Will use default based on symbol
+                            symbol
                         )
                         results['signal_comparison'] = comparison
                     
@@ -1390,15 +1394,15 @@ def main():
     # Change these values to test different stocks and time periods
     
     # Stock to test (e.g., 'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK')
-    SYMBOL = 'ICICIBANK'
+    SYMBOL = 'HDFCBANK'
     
     # Number of days to fetch (e.g., 3000 for ~12 years, 1000 for ~4 years, 250 for ~1 year)
     DAYS = 3000
     
     # OR use specific date range (set USE_DATE_RANGE = True)
-    USE_DATE_RANGE = False
-    START_DATE = datetime(2020, 1, 1)  # Start date
-    END_DATE = datetime(2024, 12, 31)   # End date
+    USE_DATE_RANGE = True
+    START_DATE = datetime(2003, 1, 1)  # Start date
+    END_DATE = datetime(2025, 6, 6)   # End date
     
     # Initial capital for P&L calculations
     INITIAL_CAPITAL = 100000  # ₹1,00,000
