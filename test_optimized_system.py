@@ -24,8 +24,8 @@ import numpy as np
 from typing import Dict, List, Optional
 
 # Import optimized configuration
-from config.optimized_settings import (
-    OptimizedTradingConfig, 
+from config.fixed_optimized_settings import (
+    FixedOptimizedTradingConfig, 
     get_conservative_config,
     get_aggressive_config,
     get_scalping_config,
@@ -61,7 +61,7 @@ class OptimizedTradingSystem:
         elif config_type == "swing":
             self.config = get_swing_trading_config()
         else:
-            self.config = OptimizedTradingConfig()
+            self.config = FixedOptimizedTradingConfig()
         
         self.processors = {}
         self.active_trades = {}

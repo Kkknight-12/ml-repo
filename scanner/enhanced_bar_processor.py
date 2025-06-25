@@ -65,6 +65,26 @@ class BarResult:
     # Risk Management (optional)
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+    
+    @property
+    def filter_all(self) -> bool:
+        """All filters passed"""
+        return all(self.filter_states.values()) if self.filter_states else True
+    
+    @property
+    def filter_volatility(self) -> bool:
+        """Volatility filter passed"""
+        return self.filter_states.get('volatility', True)
+    
+    @property
+    def filter_regime(self) -> bool:
+        """Regime filter passed"""
+        return self.filter_states.get('regime', True)
+    
+    @property
+    def filter_adx(self) -> bool:
+        """ADX filter passed"""
+        return self.filter_states.get('adx', True)
 
 
 class EnhancedBarProcessor:
@@ -160,10 +180,7 @@ class EnhancedBarProcessor:
         # Calculate features using stateful indicators
         feature_series = self._calculate_features_stateful(high, low, close)
 
-        # Update feature arrays
-        self._update_feature_arrays(feature_series)
-
-        # Update training data (look back 4 bars)
+        # Update training data (look back 4 bars) BEFORE updating feature arrays
         if bar_index >= 4:
             close_4_bars_ago = self.bars.get_close(4)
             self.ml_model.update_training_data(close, close_4_bars_ago)
@@ -198,6 +215,10 @@ class EnhancedBarProcessor:
                 remaining = self.settings.max_bars_back - bar_index
                 print(f"   📊 ML Warmup: {bar_index}/{self.settings.max_bars_back} bars "
                       f"({remaining} bars until ML predictions begin)")
+        
+        # Update feature arrays AFTER ML prediction
+        # This ensures ML compares current features with historical features only
+        self._update_feature_arrays(feature_series)
         
         # Apply filters using stateful calculations
         filter_states = self._apply_filters_stateful(high, low, close)

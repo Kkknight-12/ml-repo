@@ -14,17 +14,23 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import json
 from typing import Dict, List, Optional
 
 # Import backtesting framework
 from backtest_framework import BacktestEngine, BacktestMetrics
+from backtest_framework_enhanced import EnhancedBacktestEngine
 
 # Import configurations
 from config.settings import TradingConfig
-from config.optimized_settings import OptimizedTradingConfig
+from config.fixed_optimized_settings import FixedOptimizedTradingConfig
+from config.timeframe_configs import TimeframeTradingConfig, TimeframeOptimizedConfig
 
 import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
@@ -32,10 +38,18 @@ class MultiTargetTester:
     """Test different exit strategies"""
     
     def __init__(self):
-        self.engine = BacktestEngine()
+        # Set up access token before initializing engine
+        if os.path.exists('.kite_session.json'):
+            with open('.kite_session.json', 'r') as f:
+                session_data = json.load(f)
+                access_token = session_data.get('access_token')
+                os.environ['KITE_ACCESS_TOKEN'] = access_token
+        
+        self.standard_engine = BacktestEngine()
+        self.enhanced_engine = EnhancedBacktestEngine()
         self.results = {}
     
-    def test_exit_strategies(self, symbol: str, days: int = 60):
+    def test_exit_strategies(self, symbol: str, days: int = 180, timeframe: str = "5minute"):
         """Compare different exit strategies"""
         
         end_date = datetime.now()
@@ -51,7 +65,7 @@ class MultiTargetTester:
         baseline_config.use_dynamic_exits = False
         baseline_config.show_exits = True
         
-        baseline_metrics = self.engine.run_backtest(
+        baseline_metrics = self.standard_engine.run_backtest(
             symbol, start_date, end_date, baseline_config
         )
         self.results['baseline'] = baseline_metrics
@@ -62,47 +76,62 @@ class MultiTargetTester:
         dynamic_config.use_dynamic_exits = True
         dynamic_config.show_exits = True
         
-        dynamic_metrics = self.engine.run_backtest(
+        dynamic_metrics = self.standard_engine.run_backtest(
             symbol, start_date, end_date, dynamic_config
         )
         self.results['dynamic'] = dynamic_metrics
         
-        # 3. Multi-target exits
-        print("\n3️⃣ Testing MULTI-TARGET EXITS...")
-        multi_target_config = OptimizedTradingConfig()
+        # 3. Multi-target exits (use enhanced engine)
+        print("\n3️⃣ Testing MULTI-TARGET EXITS (Enhanced)...")
+        multi_target_config = FixedOptimizedTradingConfig()
         multi_target_config.use_dynamic_exits = True
         multi_target_config.show_exits = True
+        # Disable overly restrictive filters for fair comparison
+        multi_target_config.use_ema_filter = False
+        multi_target_config.use_sma_filter = False
+        multi_target_config.use_adx_filter = False  # Disable ADX filter
+        multi_target_config.regime_threshold = -0.1  # Use standard threshold
         # Uses default targets: 50% at 1.5R, 30% at 3R, 20% trailing
         
-        multi_target_metrics = self.engine.run_backtest(
+        multi_target_metrics = self.enhanced_engine.run_backtest(
             symbol, start_date, end_date, multi_target_config
         )
         self.results['multi_target'] = multi_target_metrics
         
-        # 4. Conservative multi-target
-        print("\n4️⃣ Testing CONSERVATIVE TARGETS...")
-        conservative_config = OptimizedTradingConfig()
+        # 4. Conservative multi-target (use enhanced engine)
+        print("\n4️⃣ Testing CONSERVATIVE TARGETS (Enhanced)...")
+        conservative_config = FixedOptimizedTradingConfig()
         conservative_config.use_dynamic_exits = True
         conservative_config.target_1_ratio = 1.2  # Quicker first target
         conservative_config.target_1_percent = 0.7  # Exit 70% quickly
         conservative_config.target_2_ratio = 2.0
         conservative_config.target_2_percent = 0.3
+        # Disable overly restrictive filters
+        conservative_config.use_ema_filter = False
+        conservative_config.use_sma_filter = False
+        conservative_config.use_adx_filter = False
+        conservative_config.regime_threshold = -0.1
         
-        conservative_metrics = self.engine.run_backtest(
+        conservative_metrics = self.enhanced_engine.run_backtest(
             symbol, start_date, end_date, conservative_config
         )
         self.results['conservative'] = conservative_metrics
         
-        # 5. Aggressive multi-target
-        print("\n5️⃣ Testing AGGRESSIVE TARGETS...")
-        aggressive_config = OptimizedTradingConfig()
+        # 5. Aggressive multi-target (use enhanced engine)
+        print("\n5️⃣ Testing AGGRESSIVE TARGETS (Enhanced)...")
+        aggressive_config = FixedOptimizedTradingConfig()
         aggressive_config.use_dynamic_exits = True
         aggressive_config.target_1_ratio = 2.0  # Higher first target
         aggressive_config.target_1_percent = 0.3  # Exit less initially
         aggressive_config.target_2_ratio = 4.0  # Much higher second target
         aggressive_config.target_2_percent = 0.4
+        # Disable overly restrictive filters
+        aggressive_config.use_ema_filter = False
+        aggressive_config.use_sma_filter = False
+        aggressive_config.use_adx_filter = False
+        aggressive_config.regime_threshold = -0.1
         
-        aggressive_metrics = self.engine.run_backtest(
+        aggressive_metrics = self.enhanced_engine.run_backtest(
             symbol, start_date, end_date, aggressive_config
         )
         self.results['aggressive'] = aggressive_metrics
@@ -269,8 +298,8 @@ def main():
     print("\nObjective: Increase average win from 3.72% to 7-10%")
     print("Method: Test different exit strategies to capture larger moves")
     
-    # Test on multiple symbols
-    symbols = ["RELIANCE", "TCS", "INFY"]
+    # Test on a single symbol for now
+    symbols = ["RELIANCE"]  # Reduced to one symbol for debugging
     
     tester = MultiTargetTester()
     best_strategies = {}
@@ -280,7 +309,7 @@ def main():
         print(f"Testing {symbol}")
         print('='*80)
         
-        best = tester.test_exit_strategies(symbol, days=90)
+        best = tester.test_exit_strategies(symbol, days=180)
         best_strategies[symbol] = best
     
     # Summary

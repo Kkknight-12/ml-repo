@@ -1,6 +1,18 @@
 """
-Optimized Settings for Lorentzian Classification Trading System
-==============================================================
+⚠️ DEPRECATED - DO NOT USE ⚠️
+==============================
+
+This configuration is DEPRECATED due to critical issues:
+- ML predictions differ 79% from standard config
+- Only generates 2 trades in 180 days (vs 47 with standard)
+- Features incompatible with trained ML model
+- Kernel smoothing blocks valid trades
+- All changes combined break the system
+
+USE INSTEAD: FixedOptimizedTradingConfig from config.fixed_optimized_settings
+
+DEPRECATED: Optimized Settings for Lorentzian Classification Trading System
+===========================================================================
 
 Based on analysis of current performance and best practices from:
 - Current test results (75% win rate but small wins ~3.7%)
@@ -21,10 +33,25 @@ from dataclasses import dataclass, field
 from typing import Dict, Tuple
 from data.data_types import Settings, FilterSettings
 from config.constants import DEFAULT_FEATURES
+import warnings
 
 @dataclass
 class OptimizedTradingConfig:
-    """Optimized configuration based on system analysis"""
+    """
+    ⚠️ DEPRECATED - DO NOT USE ⚠️
+    
+    Use FixedOptimizedTradingConfig from config.fixed_optimized_settings instead.
+    This config generates only 2 trades in 180 days due to incompatible changes.
+    """
+    
+    def __post_init__(self):
+        """Issue deprecation warning when instantiated"""
+        warnings.warn(
+            "OptimizedTradingConfig is DEPRECATED and generates only 2 trades in 180 days! "
+            "Use FixedOptimizedTradingConfig from config.fixed_optimized_settings instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
     
     # ===== CORE ML PARAMETERS (Minimal changes for stability) =====
     
@@ -235,7 +262,9 @@ class OptimizedTradingConfig:
 # ===== CONFIGURATION PRESETS =====
 
 def get_conservative_config() -> OptimizedTradingConfig:
-    """Conservative settings for beginners or small accounts"""
+    """Conservative settings for beginners or small accounts
+    ⚠️ DEPRECATED - Returns deprecated OptimizedTradingConfig
+    """
     config = OptimizedTradingConfig()
     config.risk_per_trade = 0.01  # 1% risk
     config.neighbors_count = 8  # More stable

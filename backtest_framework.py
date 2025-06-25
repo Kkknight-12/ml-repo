@@ -25,10 +25,10 @@ import seaborn as sns
 # Core imports
 from scanner.enhanced_bar_processor import EnhancedBarProcessor
 from config.settings import TradingConfig
-from config.optimized_settings import OptimizedTradingConfig
+from config.fixed_optimized_settings import FixedOptimizedTradingConfig
 from config.modular_strategies import ModularTradingSystem, StrategyModule
 from data.zerodha_client import ZerodhaClient
-from data.cache_manager import CacheManager
+from data.cache_manager import MarketDataCache
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -123,7 +123,7 @@ class BacktestEngine:
     
     def __init__(self, initial_capital: float = 100000):
         self.initial_capital = initial_capital
-        self.cache_manager = CacheManager()
+        self.cache_manager = MarketDataCache()
         self.trades: List[TradeResult] = []
         
     def run_backtest(
@@ -135,7 +135,11 @@ class BacktestEngine:
         modular_system: Optional[ModularTradingSystem] = None,
         commission: float = 0.001  # 0.1% per trade
     ) -> BacktestMetrics:
-        """Run a complete backtest"""
+        """Run a complete backtest
+        
+        NOTE: This engine does NOT implement multi-target exits.
+        For multi-target functionality, use BacktestEngineEnhanced.
+        """
         
         logger.info(f"Starting backtest for {symbol} from {start_date} to {end_date}")
         
@@ -154,6 +158,10 @@ class BacktestEngine:
         bars_processed = 0
         
         # Process each bar
+        logger.info(f"Total bars in dataset: {len(df)}")
+        logger.info(f"Warmup period: {config.max_bars_back} bars")
+        logger.info(f"Bars available for trading: {max(0, len(df) - config.max_bars_back)}")
+        
         for idx, row in df.iterrows():
             bars_processed += 1
             
@@ -199,18 +207,34 @@ class BacktestEngine:
                     equity_curve.append(equity_curve[-1])
             
             # Check for entry
-            elif not current_position and abs(signal_score) >= 3.0:
-                # Enter position
-                current_position = {
-                    'entry_bar': bars_processed,
-                    'entry_date': idx,
-                    'entry_price': row['close'],
-                    'direction': 1 if signal_score > 0 else -1,
-                    'pattern_score': pattern_score,
-                    'stop_loss': self._calculate_stop_loss(row, config),
-                    'targets': self._calculate_targets(row, config)
-                }
-                equity_curve.append(equity_curve[-1])
+            elif not current_position:
+                # Use proper entry signals that respect filters
+                if result.start_long_trade:
+                    current_position = {
+                        'symbol': symbol,
+                        'entry_bar': bars_processed,
+                        'entry_date': idx,
+                        'entry_price': row['close'],
+                        'direction': 1,
+                        'pattern_score': pattern_score,
+                        'stop_loss': self._calculate_stop_loss(row, config),
+                        'targets': self._calculate_targets(row, config)
+                    }
+                    equity_curve.append(equity_curve[-1])
+                elif result.start_short_trade:
+                    current_position = {
+                        'symbol': symbol,
+                        'entry_bar': bars_processed,
+                        'entry_date': idx,
+                        'entry_price': row['close'],
+                        'direction': -1,
+                        'pattern_score': pattern_score,
+                        'stop_loss': self._calculate_stop_loss(row, config),
+                        'targets': self._calculate_targets(row, config)
+                    }
+                    equity_curve.append(equity_curve[-1])
+                else:
+                    equity_curve.append(equity_curve[-1])
             else:
                 equity_curve.append(equity_curve[-1])
         
@@ -244,7 +268,7 @@ class BacktestEngine:
             
             # Create config
             if config_dict.get('type') == 'optimized':
-                config = OptimizedTradingConfig()
+                config = FixedOptimizedTradingConfig()
             else:
                 config = TradingConfig()
             
@@ -298,23 +322,44 @@ class BacktestEngine:
         """Get historical data with caching"""
         
         # Check cache first
-        cache_key = f"{symbol}_5minute_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
-        cached_data = self.cache_manager.get_cache(cache_key, max_age_hours=24*7)
+        cached_data = self.cache_manager.get_cached_data(
+            symbol, start_date, end_date, "5minute"
+        )
         
-        if cached_data is not None:
+        if cached_data is not None and not cached_data.empty:
             logger.info("Using cached data")
+            # Ensure date is index
+            if 'date' in cached_data.columns:
+                cached_data.set_index('date', inplace=True)
             return cached_data
         
         # Fetch from API
         try:
+            # Ensure access token is set
+            if os.path.exists('.kite_session.json'):
+                with open('.kite_session.json', 'r') as f:
+                    session_data = json.load(f)
+                    access_token = session_data.get('access_token')
+                    os.environ['KITE_ACCESS_TOKEN'] = access_token
+            
             client = ZerodhaClient()
             days = (end_date - start_date).days
-            df = client.get_historical_data(symbol, "5minute", days)
+            data = client.get_historical_data(symbol, "5minute", days)
             
-            # Cache for future use
-            self.cache_manager.save_cache(cache_key, df)
-            
-            return df
+            if data:
+                # Convert list of dicts to DataFrame
+                df = pd.DataFrame(data)
+                df['date'] = pd.to_datetime(df['date'])
+                df.set_index('date', inplace=True)
+                
+                # Cache for future use
+                df_for_cache = df.reset_index()
+                self.cache_manager.save_data(symbol, df_for_cache, "5minute")
+                
+                return df
+            else:
+                logger.warning(f"No data received for {symbol}")
+                return pd.DataFrame()
         except Exception as e:
             logger.error(f"Failed to get historical data: {e}")
             return pd.DataFrame()
@@ -397,7 +442,7 @@ class BacktestEngine:
         hold_time = current_bar - position['entry_bar']
         
         return TradeResult(
-            symbol=bar.name,
+            symbol=position.get('symbol', 'UNKNOWN'),
             entry_date=position['entry_date'],
             exit_date=bar.name,
             entry_price=position['entry_price'],
