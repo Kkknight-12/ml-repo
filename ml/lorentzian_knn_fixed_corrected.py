@@ -153,6 +153,15 @@ class LorentzianKNNFixedCorrected:
         if size_loop < 0:
             self.prediction = 0.0
             return self.prediction
+        
+        # Debug logging for first few predictions after warmup
+        if bar_index == self.settings.max_bars_back and hasattr(self, '_debug_logged') == False:
+            print(f"\n🔍 DEBUG: First ML prediction at bar {bar_index}")
+            print(f"   Training data size: {len(self.y_train_array)}")
+            print(f"   size_loop: {size_loop}")
+            print(f"   Current predictions array: {self.predictions}")
+            print(f"   Current distances array: {self.distances}")
+            self._debug_logged = True
 
         # Reset last_distance for this bar (not var in Pine Script)
         last_distance = -1.0
@@ -164,6 +173,10 @@ class LorentzianKNNFixedCorrected:
             d = self.get_lorentzian_distance(
                 i, self.settings.feature_count, feature_series, feature_arrays
             )
+            
+            # Debug first few iterations after warmup
+            if bar_index == self.settings.max_bars_back and i < 10:
+                print(f"   i={i}: distance={d:.4f}, last_distance={last_distance:.4f}, i%4={i%4}")
 
             # Pine Script: if d >= lastDistance and i%4
             # CRITICAL: i%4 is truthy when i%4 != 0

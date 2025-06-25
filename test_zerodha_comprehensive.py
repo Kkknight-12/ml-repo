@@ -1033,56 +1033,106 @@ class ComprehensiveMarketTest:
         
         # Calculate capital progression
         current_capital = initial_capital
+        cumulative_pnl = 0
         
         # Write detailed trade data
         with open(filename, 'w', newline='') as f:
             fieldnames = [
-                'entry_date', 'exit_date', 'type', 'entry_price', 'exit_price',
-                'shares', 'position_value', 'pnl_amount', 'pnl_pct', 
-                'capital_after_trade', 'bars_held'
+                'trade_no', 'entry_date', 'buy_price', 'exit_date', 'sell_price',
+                'type', 'shares', 'investment', 'exit_value', 'profit_loss', 
+                'profit_loss_pct', 'cumulative_profit', 'cumulative_return_pct',
+                'capital_after_trade', 'days_held'
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             
-            for trade in perf['trades']:
+            for i, trade in enumerate(perf['trades'], 1):
                 # Calculate shares and P&L
                 shares = int(current_capital * 0.95 / trade['entry_price'])
                 position_value = shares * trade['entry_price']
-                pnl_amount = position_value * (trade['profit_pct'] / 100)
+                exit_value = shares * trade['exit_price']
+                
+                # Calculate profit/loss
+                if trade['type'] == 'LONG':
+                    pnl_amount = exit_value - position_value
+                else:  # SHORT
+                    pnl_amount = position_value - exit_value
+                
                 current_capital += pnl_amount
+                cumulative_pnl += pnl_amount
+                cumulative_return_pct = (cumulative_pnl / initial_capital) * 100
+                
+                # Calculate days held (assuming daily bars)
+                days_held = trade['bars_held']
                 
                 row = {
+                    'trade_no': i,
                     'entry_date': trade['entry_date'],
+                    'buy_price': f"{trade['entry_price']:.2f}",
                     'exit_date': trade['exit_date'],
+                    'sell_price': f"{trade['exit_price']:.2f}",
                     'type': trade['type'],
-                    'entry_price': f"{trade['entry_price']:.2f}",
-                    'exit_price': f"{trade['exit_price']:.2f}",
                     'shares': shares,
-                    'position_value': f"{position_value:.2f}",
-                    'pnl_amount': f"{pnl_amount:.2f}",
-                    'pnl_pct': f"{trade['profit_pct']:.2f}",
+                    'investment': f"{position_value:.2f}",
+                    'exit_value': f"{exit_value:.2f}",
+                    'profit_loss': f"{pnl_amount:.2f}",
+                    'profit_loss_pct': f"{trade['profit_pct']:.2f}",
+                    'cumulative_profit': f"{cumulative_pnl:.2f}",
+                    'cumulative_return_pct': f"{cumulative_return_pct:.2f}",
                     'capital_after_trade': f"{current_capital:.2f}",
-                    'bars_held': trade['bars_held']
+                    'days_held': days_held
                 }
                 writer.writerow(row)
         
         print(f"\n💾 Exported detailed trade data to {filename}")
         
-        # Create summary file
+        # Create enhanced summary file
         summary_filename = filename.replace('detailed_trades', 'trade_summary')
         with open(summary_filename, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([f'Trading Summary for {symbol}'])
+            writer.writerow([f'═══════════════════════════════════════════════════'])
+            writer.writerow([f'TRADING SUMMARY FOR {symbol}'])
+            writer.writerow([f'═══════════════════════════════════════════════════'])
             writer.writerow([])
+            writer.writerow(['CAPITAL SUMMARY'])
+            writer.writerow(['─' * 30])
             writer.writerow(['Initial Capital', f"₹{initial_capital:,.2f}"])
             writer.writerow(['Final Capital', f"₹{current_capital:,.2f}"])
-            writer.writerow(['Total P&L', f"₹{current_capital - initial_capital:,.2f}"])
-            writer.writerow(['Total Return', f"{((current_capital - initial_capital) / initial_capital * 100):.2f}%"])
+            writer.writerow(['Total Profit/Loss', f"₹{cumulative_pnl:,.2f}"])
+            writer.writerow(['Total Return', f"{cumulative_return_pct:.2f}%"])
+            writer.writerow([])
+            writer.writerow(['TRADE STATISTICS'])
+            writer.writerow(['─' * 30])
             writer.writerow(['Total Trades', perf['total_trades']])
+            writer.writerow(['Winning Trades', perf['winning_trades']])
+            writer.writerow(['Losing Trades', perf['losing_trades']])
             writer.writerow(['Win Rate', f"{perf['win_rate']:.1f}%"])
+            writer.writerow(['Average Win', f"{perf['avg_win_pct']:.2f}%"])
+            writer.writerow(['Average Loss', f"{perf['avg_loss_pct']:.2f}%"])
             writer.writerow(['Profit Factor', f"{perf['profit_factor']:.2f}"])
+            writer.writerow(['Average Days Held', f"{perf['avg_bars_held']:.0f}"])
+            writer.writerow([])
+            writer.writerow(['PROFIT CALCULATION METHOD'])
+            writer.writerow(['─' * 30])
+            writer.writerow(['Method', 'Compound Returns'])
+            writer.writerow(['Position Size', '95% of available capital'])
+            writer.writerow(['Capital Reinvestment', 'Yes - profits/losses affect next trade size'])
         
         print(f"💾 Exported trade summary to {summary_filename}")
+        
+        # Print summary to console as well
+        print(f"\n{'═' * 50}")
+        print(f"FINAL TRADING SUMMARY - {symbol}")
+        print(f"{'═' * 50}")
+        print(f"\n💰 Capital Performance:")
+        print(f"   Initial Capital: ₹{initial_capital:,.2f}")
+        print(f"   Final Capital: ₹{current_capital:,.2f}")
+        print(f"   Total P&L: ₹{cumulative_pnl:,.2f}")
+        print(f"   Total Return: {cumulative_return_pct:.2f}%")
+        print(f"\n📊 Trade Statistics:")
+        print(f"   Total Trades: {perf['total_trades']}")
+        print(f"   Win Rate: {perf['win_rate']:.1f}%")
+        print(f"   Profit Factor: {perf['profit_factor']:.2f}")
         
         return filename
     

@@ -17,7 +17,7 @@ import numpy as np
 from config.settings import TradingConfig
 from scanner.enhanced_bar_processor import EnhancedBarProcessor
 from core.pine_functions import nz
-from ml.lorentzian_knn_fixed import LorentzianKNNFixed
+from ml.lorentzian_knn_fixed_corrected import LorentzianKNNFixedCorrected
 from core.kernel_functions import rational_quadratic
 
 
@@ -89,7 +89,7 @@ class EnhancedBarComparison:
         df = df.reset_index(drop=True)
         
         # Initialize processor
-        processor = EnhancedBarProcessor(self.config, symbol, "day", debug_mode=False)
+        processor = EnhancedBarProcessor(self.config, symbol, "day", debug_mode=True)
         
         # Output filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
