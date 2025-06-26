@@ -49,9 +49,9 @@ class FixedOptimizedTradingConfig(TradingConfig):
     # CHANGE: Tighten regime threshold for better selectivity
     regime_threshold: float = -0.15  # Slightly tighter than -0.1
     
-    # CHANGE: Enable ADX but with reasonable threshold
-    use_adx_filter: bool = True
-    adx_threshold: int = 20  # Keep at 20, not 25
+    # CHANGE: Disable ADX filter (matches Pine Script default)
+    use_adx_filter: bool = False  # Pine Script default is False
+    adx_threshold: int = 20  # Keep at 20 if ever enabled
     
     # KEEP trend filters disabled by default
     use_ema_filter: bool = False
