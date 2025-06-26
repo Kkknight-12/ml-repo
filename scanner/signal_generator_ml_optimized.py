@@ -234,6 +234,32 @@ class MLOptimizedSignalGenerator:
         
         return bars_held
     
+    def is_early_signal_flip(self, signal_history: List[int]) -> bool:
+        """
+        Check if signal flipped too early (within first 4 bars)
+        
+        Args:
+            signal_history: Historical signals
+            
+        Returns:
+            True if early flip detected
+        """
+        if len(signal_history) < 5:
+            return False
+        
+        # Get signals
+        current_signal = signal_history[0]
+        signal_4_bars_ago = signal_history[4]
+        
+        # Check if we had a position 4 bars ago and signal flipped
+        if signal_4_bars_ago != self.label.neutral and current_signal != self.label.neutral:
+            # Check if signal flipped direction
+            if (signal_4_bars_ago == self.label.long and current_signal == self.label.short) or \
+               (signal_4_bars_ago == self.label.short and current_signal == self.label.long):
+                return True
+        
+        return False
+    
     def get_entry_strength(self, ml_prediction: float) -> str:
         """
         Categorize entry strength based on ML prediction
