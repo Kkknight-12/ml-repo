@@ -45,7 +45,8 @@ class MultiTargetTester:
                 access_token = session_data.get('access_token')
                 os.environ['KITE_ACCESS_TOKEN'] = access_token
         
-        self.standard_engine = BacktestEngine()
+        # Only use enhanced engine which has all the fixes
+        self.standard_engine = EnhancedBacktestEngine()
         self.enhanced_engine = EnhancedBacktestEngine()
         self.results = {}
     

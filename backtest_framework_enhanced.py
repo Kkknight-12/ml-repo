@@ -582,6 +582,100 @@ class EnhancedBacktestEngine:
                 targets.append(bar['close'] + risk * config.target_2_ratio)
         
         return targets
+    
+    def _calculate_metrics(
+        self,
+        trades: List[TradeResult],
+        equity_curve: List[float],
+        total_bars: int
+    ) -> BacktestMetrics:
+        """Calculate comprehensive metrics"""
+        
+        if not trades:
+            return BacktestMetrics(
+                total_trades=0, winning_trades=0, losing_trades=0,
+                win_rate=0, total_return=0, average_win=0, average_loss=0,
+                largest_win=0, largest_loss=0, profit_factor=0,
+                max_drawdown=0, max_drawdown_duration=0,
+                sharpe_ratio=0, sortino_ratio=0,
+                avg_bars_in_trade=0, max_consecutive_wins=0, max_consecutive_losses=0,
+                start_date=datetime.now(), end_date=datetime.now(), total_bars=total_bars
+            )
+        
+        # Basic statistics
+        winning_trades = [t for t in trades if t.is_winner]
+        losing_trades = [t for t in trades if not t.is_winner]
+        
+        # Returns
+        returns = [t.pnl_percent for t in trades]
+        total_return = (equity_curve[-1] - self.initial_capital) / self.initial_capital * 100
+        
+        # Risk metrics
+        equity_series = pd.Series(equity_curve)
+        drawdowns = (equity_series - equity_series.cummax()) / equity_series.cummax() * 100
+        max_drawdown = abs(drawdowns.min()) if not drawdowns.empty else 0
+        
+        # Calculate Sharpe ratio (simplified)
+        if len(returns) > 1:
+            returns_series = pd.Series(returns)
+            sharpe = returns_series.mean() / returns_series.std() * np.sqrt(252) if returns_series.std() > 0 else 0
+        else:
+            sharpe = 0
+        
+        # Sortino ratio (downside deviation)
+        negative_returns = [r for r in returns if r < 0]
+        if negative_returns:
+            downside_std = np.std(negative_returns)
+            sortino = np.mean(returns) / downside_std * np.sqrt(252) if downside_std > 0 else 0
+        else:
+            sortino = sharpe
+        
+        # Trade timing
+        avg_hold = np.mean([t.hold_time_bars for t in trades]) if trades else 0
+        
+        # Profit factor
+        gross_profit = sum(t.pnl_percent for t in winning_trades) if winning_trades else 0
+        gross_loss = abs(sum(t.pnl_percent for t in losing_trades)) if losing_trades else 0
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0
+        
+        # Consecutive wins/losses
+        max_consec_wins = 0
+        max_consec_losses = 0
+        current_wins = 0
+        current_losses = 0
+        
+        for trade in trades:
+            if trade.is_winner:
+                current_wins += 1
+                current_losses = 0
+                max_consec_wins = max(max_consec_wins, current_wins)
+            else:
+                current_losses += 1
+                current_wins = 0
+                max_consec_losses = max(max_consec_losses, current_losses)
+        
+        return BacktestMetrics(
+            total_trades=len(trades),
+            winning_trades=len(winning_trades),
+            losing_trades=len(losing_trades),
+            win_rate=len(winning_trades) / len(trades) * 100 if trades else 0,
+            total_return=total_return,
+            average_win=np.mean([t.pnl_percent for t in winning_trades]) if winning_trades else 0,
+            average_loss=np.mean([t.pnl_percent for t in losing_trades]) if losing_trades else 0,
+            largest_win=max([t.pnl_percent for t in trades]) if trades else 0,
+            largest_loss=min([t.pnl_percent for t in trades]) if trades else 0,
+            profit_factor=profit_factor,
+            max_drawdown=max_drawdown,
+            max_drawdown_duration=0,  # TODO: Calculate properly
+            sharpe_ratio=sharpe,
+            sortino_ratio=sortino,
+            avg_bars_in_trade=avg_hold,
+            max_consecutive_wins=max_consec_wins,
+            max_consecutive_losses=max_consec_losses,
+            start_date=trades[0].entry_date if trades else datetime.now(),
+            end_date=trades[-1].exit_date if trades else datetime.now(),
+            total_bars=total_bars
+        )
 
 
 def compare_exit_strategies_enhanced(symbol: str, days: int = 180):

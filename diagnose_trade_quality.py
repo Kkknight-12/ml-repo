@@ -30,7 +30,7 @@ if os.path.exists('.kite_session.json'):
         os.environ['KITE_ACCESS_TOKEN'] = access_token
 
 
-class TradeQualityAnalyzer(BacktestEngine):
+class TradeQualityAnalyzer(EnhancedBacktestEngine):
     """Extended backtest engine that captures detailed trade entry information"""
     
     def __init__(self):
@@ -46,6 +46,75 @@ class TradeQualityAnalyzer(BacktestEngine):
     ) -> Tuple[BacktestMetrics, List[Dict]]:
         """Run backtest and capture detailed trade information"""
         
+        # Store original state
+        original_trades = self.trades.copy()
+        original_details = self.trade_details.copy()
+        
+        # Override the _close_enhanced_position method to capture details
+        original_close = self._close_enhanced_position
+        
+        def capture_close_position(position, bar, exit_reason, current_bar):
+            # Call original method
+            trade = original_close(position, bar, exit_reason, current_bar)
+            
+            # Store detailed trade info
+            self.trade_details.append({
+                'symbol': position.symbol,
+                'entry_date': position.entry_date,
+                'entry_price': position.entry_price,
+                'exit_date': bar.name,
+                'exit_price': bar['close'],
+                'direction': position.direction,
+                'pnl_percent': trade.pnl_percent,
+                'is_winner': trade.is_winner,
+                'hold_time_bars': trade.hold_time_bars,
+                'exit_reason': exit_reason,
+                # Entry conditions
+                'entry_ml_prediction': getattr(position, 'ml_prediction', 0),
+                'entry_signal': getattr(position, 'signal', 0),
+                'entry_filters': getattr(position, 'filters', {}),
+                'entry_prediction_strength': getattr(position, 'prediction_strength', 0),
+                # Market conditions at entry
+                'entry_volatility': getattr(position, 'volatility_pass', True),
+                'entry_regime': getattr(position, 'regime_pass', True),
+                'entry_adx': getattr(position, 'adx_pass', True),
+                'entry_kernel': getattr(position, 'kernel_pass', True)
+            })
+            
+            return trade
+        
+        # Temporarily replace the method
+        self._close_enhanced_position = capture_close_position
+        
+        # Override _create_enhanced_position to capture entry details
+        original_create = self._create_enhanced_position
+        
+        def capture_create_position(sym, bar_num, date, bar, signal, pattern_score, cfg):
+            # Get the ML result from the processor
+            processor = self._current_processor if hasattr(self, '_current_processor') else None
+            ml_result = self._current_ml_result if hasattr(self, '_current_ml_result') else None
+            
+            # Call original method
+            position = original_create(sym, bar_num, date, bar, signal, pattern_score, cfg)
+            
+            # Add extra attributes for tracking
+            if ml_result:
+                position.ml_prediction = ml_result.prediction
+                position.signal = ml_result.signal
+                position.filters = ml_result.filter_states.copy()
+                position.prediction_strength = ml_result.prediction_strength
+                position.volatility_pass = ml_result.filter_volatility
+                position.regime_pass = ml_result.filter_regime
+                position.adx_pass = ml_result.filter_adx
+                position.kernel_pass = ml_result.filter_states.get('kernel', True)
+            
+            return position
+        
+        self._create_enhanced_position = capture_create_position
+        
+        # Run the backtest with modified engine
+        from scanner.enhanced_bar_processor import EnhancedBarProcessor
+        
         # Get historical data
         df = self._get_historical_data(symbol, start_date, end_date)
         if df.empty:
@@ -57,6 +126,7 @@ class TradeQualityAnalyzer(BacktestEngine):
         # Initialize tracking
         self.trades = []
         self.trade_details = []
+        self.partial_trades = []
         equity_curve = [self.initial_capital]
         current_position = None
         bars_processed = 0
@@ -70,6 +140,10 @@ class TradeQualityAnalyzer(BacktestEngine):
                 row['close'], row['volume']
             )
             
+            # Store for position creation
+            self._current_processor = processor
+            self._current_ml_result = result
+            
             # Skip warmup period
             if bars_processed < config.max_bars_back:
                 equity_curve.append(equity_curve[-1])
@@ -77,40 +151,16 @@ class TradeQualityAnalyzer(BacktestEngine):
             
             # Check for exit
             if current_position:
-                exit_signal = self._check_exit(
+                exit_info = self._check_standard_exit(
                     current_position, row, result, config
                 )
                 
-                if exit_signal:
-                    # Close position
-                    trade = self._close_position(
-                        current_position, row, exit_signal, bars_processed
+                if exit_info:
+                    # Complete exit
+                    trade = self._close_enhanced_position(
+                        current_position, row, exit_info['reason'], bars_processed
                     )
                     self.trades.append(trade)
-                    
-                    # Store detailed trade info
-                    self.trade_details.append({
-                        'symbol': symbol,
-                        'entry_date': current_position['entry_date'],
-                        'entry_price': current_position['entry_price'],
-                        'exit_date': row.name,
-                        'exit_price': row['close'],
-                        'direction': current_position['direction'],
-                        'pnl_percent': trade.pnl_percent,
-                        'is_winner': trade.is_winner,
-                        'hold_time_bars': trade.hold_time_bars,
-                        'exit_reason': exit_signal,
-                        # Entry conditions
-                        'entry_ml_prediction': current_position['ml_prediction'],
-                        'entry_signal': current_position['signal'],
-                        'entry_filters': current_position['filters'],
-                        'entry_prediction_strength': current_position['prediction_strength'],
-                        # Market conditions at entry
-                        'entry_volatility': current_position['volatility_pass'],
-                        'entry_regime': current_position['regime_pass'],
-                        'entry_adx': current_position['adx_pass'],
-                        'entry_kernel': current_position['kernel_pass']
-                    })
                     
                     # Update equity
                     pnl = self.initial_capital * (trade.pnl_percent / 100)
@@ -121,26 +171,17 @@ class TradeQualityAnalyzer(BacktestEngine):
             
             # Check for entry
             elif not current_position:
-                if result.start_long_trade or result.start_short_trade:
-                    # Capture detailed entry conditions
-                    current_position = {
-                        'symbol': symbol,
-                        'entry_bar': bars_processed,
-                        'entry_date': idx,
-                        'entry_price': row['close'],
-                        'direction': 1 if result.start_long_trade else -1,
-                        'stop_loss': self._calculate_stop_loss(row, config),
-                        # ML and signal info
-                        'ml_prediction': result.prediction,
-                        'signal': result.signal,
-                        'filters': result.filter_states.copy(),
-                        'prediction_strength': result.prediction_strength,
-                        # Individual filter states
-                        'volatility_pass': result.filter_volatility,
-                        'regime_pass': result.filter_regime,
-                        'adx_pass': result.filter_adx,
-                        'kernel_pass': result.filter_states.get('kernel', True)
-                    }
+                if result.start_long_trade:
+                    current_position = self._create_enhanced_position(
+                        symbol, bars_processed, idx, row, 
+                        abs(result.prediction), 5.0, config
+                    )
+                    equity_curve.append(equity_curve[-1])
+                elif result.start_short_trade:
+                    current_position = self._create_enhanced_position(
+                        symbol, bars_processed, idx, row, 
+                        -abs(result.prediction), 5.0, config
+                    )
                     equity_curve.append(equity_curve[-1])
                 else:
                     equity_curve.append(equity_curve[-1])
@@ -149,15 +190,22 @@ class TradeQualityAnalyzer(BacktestEngine):
         
         # Close any open position at end
         if current_position:
-            trade = self._close_position(
-                current_position, df.iloc[-1], "END_OF_DATA", bars_processed
-            )
-            self.trades.append(trade)
+            self._finalize_position(current_position, df.iloc[-1], bars_processed)
         
         # Calculate metrics
         metrics = self._calculate_metrics(
             self.trades, equity_curve, bars_processed
         )
+        
+        # Restore original methods
+        self._close_enhanced_position = original_close
+        self._create_enhanced_position = original_create
+        
+        # Clean up temporary attributes
+        if hasattr(self, '_current_processor'):
+            delattr(self, '_current_processor')
+        if hasattr(self, '_current_ml_result'):
+            delattr(self, '_current_ml_result')
         
         return metrics, self.trade_details
 
