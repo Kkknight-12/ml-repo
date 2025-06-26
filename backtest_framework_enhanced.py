@@ -560,6 +560,28 @@ class EnhancedBacktestEngine:
         # (In production, would fetch from API)
         logger.warning(f"No cached data available for {symbol}")
         return pd.DataFrame()
+    
+    def _calculate_stop_loss(self, bar: pd.Series, config) -> float:
+        """Calculate stop loss price"""
+        # Simplified - in reality would use ATR
+        if hasattr(config, 'stop_loss_atr_multiplier'):
+            atr = bar['close'] * 0.02  # 2% as placeholder
+            return bar['close'] - atr * config.stop_loss_atr_multiplier
+        else:
+            return bar['close'] * 0.98  # 2% stop
+    
+    def _calculate_targets(self, bar: pd.Series, config) -> List[float]:
+        """Calculate profit targets"""
+        targets = []
+        
+        if hasattr(config, 'target_1_ratio'):
+            risk = bar['close'] * 0.02  # Placeholder
+            targets.append(bar['close'] + risk * config.target_1_ratio)
+            
+            if hasattr(config, 'target_2_ratio'):
+                targets.append(bar['close'] + risk * config.target_2_ratio)
+        
+        return targets
 
 
 def compare_exit_strategies_enhanced(symbol: str, days: int = 180):
