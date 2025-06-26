@@ -40,70 +40,28 @@ class MLOptimizedBarProcessor(EnhancedBarProcessor):
         """
         Process bar with ML threshold check
         
-        Override to pass ML prediction to signal generator
+        Simply checks ML threshold after normal processing
         """
         # Call parent process_bar to get all calculations
         result = super().process_bar(open_price, high, low, close, volume)
         
-        # If we're past warmup and have ML prediction, recheck entry signals
+        # Apply ML threshold filter to entries
         if self.bars_processed >= self.settings.max_bars_back:
-            # Get current ML prediction
-            ml_prediction = self.ml_model.prediction
+            ml_prediction = result.prediction
             
-            # Re-evaluate entry signals with ML threshold
-            # Get current states
-            signal = self.ml_model.signal
-            bar_index = self.bars_processed - 1
-            
-            # Get filter states
-            filter_states = self._apply_filters_stateful(high, low, close)
-            
-            # Calculate trend filters
-            is_ema_uptrend, is_ema_downtrend = self._calculate_ema_trend_stateful(close)
-            is_sma_uptrend, is_sma_downtrend = self._calculate_sma_trend_stateful(close)
-            
-            # Calculate kernel filters
-            is_bullish_kernel = self._calculate_kernel_bullish()
-            is_bearish_kernel = self._calculate_kernel_bearish()
-            
-            # Check entry with ML threshold
-            # First check ML threshold
+            # Check ML threshold
             if abs(ml_prediction) < self.ml_threshold:
-                start_long, start_short = False, False
-                if self.debug_mode and signal != 0:
-                    print(f"  ⚠️ ML Threshold Filter: Signal blocked (|{ml_prediction:.2f}| < {self.ml_threshold})")
+                # Block entries if ML prediction is too weak
+                if result.start_long_trade or result.start_short_trade:
+                    if self.debug_mode:
+                        print(f"  ⚠️ ML Threshold blocked entry: |{ml_prediction:.2f}| < {self.ml_threshold}")
+                    result.start_long_trade = False
+                    result.start_short_trade = False
             else:
-                # ML threshold passed, now check other conditions
-                if hasattr(self.signal_generator, 'check_entry_conditions_relaxed'):
-                    # Use relaxed conditions (no volatility filter)
-                    start_long, start_short = self.signal_generator.check_entry_conditions_relaxed(
-                        signal, self.signal_history[1:], ml_prediction,  # Exclude current signal
-                        is_bullish_kernel, is_bearish_kernel,
-                        volatility_filter=filter_states.get('volatility', True),
-                        regime_filter=filter_states.get('regime', True),
-                        adx_filter=filter_states.get('adx', True)
-                    )
-                else:
-                    # For standard signal generator, check entry normally
-                    # but we already know ML threshold passed
-                    start_long, start_short = self.signal_generator.check_entry_conditions(
-                        signal, self.signal_history[1:],
-                        is_bullish_kernel, is_bearish_kernel,
-                        is_ema_uptrend, is_ema_downtrend, 
-                        is_sma_uptrend, is_sma_downtrend
-                    )
-            
-            # Update result with ML-filtered entries
-            result.start_long_trade = start_long
-            result.start_short_trade = start_short
-            
-            # Log ML threshold filtering
-            if self.debug_mode and (result.signal != 0):
-                if abs(ml_prediction) < self.ml_threshold:
-                    print(f"  ⚠️ ML Threshold Filter: Signal blocked (|{ml_prediction:.2f}| < {self.ml_threshold})")
-                elif start_long or start_short:
+                # Log successful entries
+                if self.debug_mode and (result.start_long_trade or result.start_short_trade):
                     strength = self.signal_generator.get_entry_strength(ml_prediction)
-                    print(f"  ✅ ML Entry: {strength} strength (|{ml_prediction:.2f}| >= {self.ml_threshold})")
+                    print(f"  ✅ ML Entry allowed: {strength} strength (|{ml_prediction:.2f}| >= {self.ml_threshold})")
         
         return result
 
