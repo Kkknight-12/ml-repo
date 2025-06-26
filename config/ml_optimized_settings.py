@@ -70,18 +70,14 @@ class MLOptimizedTradingConfig(TradingConfig):
     use_dynamic_exits: bool = True
     
     # Multi-target configuration for 2:1+ risk/reward
-    # Target 1: Quick profit at 1.5R
-    target_1_enabled: bool = True
+    # These parameters match what EnhancedBacktestEngine expects
     target_1_ratio: float = 1.5  # 1.5x risk for first target
     target_1_percent: float = 0.5  # Exit 50% at first target
     
-    # Target 2: Larger profit at 3R
-    target_2_enabled: bool = True
     target_2_ratio: float = 3.0  # 3x risk for second target
     target_2_percent: float = 0.3  # Exit 30% at second target
     
     # Remaining 20% trails with stop
-    trailing_stop_enabled: bool = True
     trailing_stop_distance_ratio: float = 1.0  # Trail at 1R distance
     
     # Stop loss settings

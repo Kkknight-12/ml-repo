@@ -67,23 +67,31 @@ class MLOptimizedBarProcessor(EnhancedBarProcessor):
             is_bearish_kernel = self._calculate_kernel_bearish()
             
             # Check entry with ML threshold
-            if hasattr(self.signal_generator, 'check_entry_conditions_relaxed'):
-                # Use relaxed conditions (no volatility filter)
-                start_long, start_short = self.signal_generator.check_entry_conditions_relaxed(
-                    signal, self.signal_history[1:], ml_prediction,  # Exclude current signal
-                    is_bullish_kernel, is_bearish_kernel,
-                    volatility_filter=filter_states.get('volatility', True),
-                    regime_filter=filter_states.get('regime', True),
-                    adx_filter=filter_states.get('adx', True)
-                )
+            # First check ML threshold
+            if abs(ml_prediction) < self.ml_threshold:
+                start_long, start_short = False, False
+                if self.debug_mode and signal != 0:
+                    print(f"  ⚠️ ML Threshold Filter: Signal blocked (|{ml_prediction:.2f}| < {self.ml_threshold})")
             else:
-                # Fallback to standard method with ML prediction
-                start_long, start_short = self.signal_generator.check_entry_conditions(
-                    signal, self.signal_history[1:], ml_prediction,  # Pass ML prediction
-                    is_bullish_kernel, is_bearish_kernel,
-                    is_ema_uptrend, is_ema_downtrend, 
-                    is_sma_uptrend, is_sma_downtrend
-                )
+                # ML threshold passed, now check other conditions
+                if hasattr(self.signal_generator, 'check_entry_conditions_relaxed'):
+                    # Use relaxed conditions (no volatility filter)
+                    start_long, start_short = self.signal_generator.check_entry_conditions_relaxed(
+                        signal, self.signal_history[1:], ml_prediction,  # Exclude current signal
+                        is_bullish_kernel, is_bearish_kernel,
+                        volatility_filter=filter_states.get('volatility', True),
+                        regime_filter=filter_states.get('regime', True),
+                        adx_filter=filter_states.get('adx', True)
+                    )
+                else:
+                    # For standard signal generator, check entry normally
+                    # but we already know ML threshold passed
+                    start_long, start_short = self.signal_generator.check_entry_conditions(
+                        signal, self.signal_history[1:],
+                        is_bullish_kernel, is_bearish_kernel,
+                        is_ema_uptrend, is_ema_downtrend, 
+                        is_sma_uptrend, is_sma_downtrend
+                    )
             
             # Update result with ML-filtered entries
             result.start_long_trade = start_long
