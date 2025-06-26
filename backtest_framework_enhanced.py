@@ -142,9 +142,14 @@ class EnhancedBacktestEngine:
         if df.empty:
             raise ValueError("No data available for backtesting")
         
-        # Initialize processor
-        from scanner.enhanced_bar_processor import EnhancedBarProcessor
-        processor = EnhancedBarProcessor(config, symbol, "5minute")
+        # Initialize processor - use ML-optimized if threshold is set
+        if hasattr(config, 'ml_prediction_threshold') and config.ml_prediction_threshold > 0:
+            from scanner.enhanced_bar_processor_ml_optimized import MLOptimizedBarProcessor
+            processor = MLOptimizedBarProcessor(config, symbol, "5minute")
+            logger.info(f"Using ML-Optimized processor with threshold: {config.ml_prediction_threshold}")
+        else:
+            from scanner.enhanced_bar_processor import EnhancedBarProcessor
+            processor = EnhancedBarProcessor(config, symbol, "5minute")
         
         # Initialize tracking
         self.trades = []
