@@ -14,8 +14,8 @@ from datetime import datetime, timedelta
 import json
 
 # Import frameworks
-from backtest_framework import BacktestEngine
 from backtest_framework_enhanced import EnhancedBacktestEngine
+# from DEPRECATED_backtest_framework import BacktestEngine  # Deprecated - use EnhancedBacktestEngine
 from config.settings import TradingConfig
 
 # Set up access token
@@ -42,7 +42,7 @@ def test_simple_multi_target():
     standard_config = TradingConfig()
     standard_config.use_dynamic_exits = True
     
-    standard_engine = BacktestEngine()
+    standard_engine = EnhancedBacktestEngine()  # Using enhanced for consistency
     standard_metrics = standard_engine.run_backtest(
         symbol, start_date, end_date, standard_config
     )

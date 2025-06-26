@@ -18,8 +18,8 @@ import json
 from typing import Dict, List, Optional
 
 # Import backtesting framework
-from backtest_framework import BacktestEngine, BacktestMetrics
-from backtest_framework_enhanced import EnhancedBacktestEngine
+from backtest_framework_enhanced import EnhancedBacktestEngine, BacktestMetrics
+# from DEPRECATED_backtest_framework import BacktestEngine  # Deprecated - use EnhancedBacktestEngine
 
 # Import configurations
 from config.settings import TradingConfig

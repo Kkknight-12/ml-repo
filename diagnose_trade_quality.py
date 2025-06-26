@@ -15,7 +15,8 @@ import pandas as pd
 import json
 from typing import List, Dict, Tuple
 
-from backtest_framework import BacktestEngine, BacktestMetrics, TradeResult
+from backtest_framework_enhanced import EnhancedBacktestEngine, BacktestMetrics, TradeResult
+# from DEPRECATED_backtest_framework import BacktestEngine  # Deprecated - use EnhancedBacktestEngine
 from scanner.enhanced_bar_processor import EnhancedBarProcessor
 from config.settings import TradingConfig
 from config.fixed_optimized_settings import FixedOptimizedTradingConfig

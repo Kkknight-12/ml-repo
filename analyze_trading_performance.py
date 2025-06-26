@@ -19,8 +19,8 @@ import numpy as np
 import json
 from typing import Dict, List, Tuple
 
-from backtest_framework import BacktestEngine
 from backtest_framework_enhanced import EnhancedBacktestEngine
+# from DEPRECATED_backtest_framework import BacktestEngine  # Deprecated - use EnhancedBacktestEngine
 from config.settings import TradingConfig
 from config.fixed_optimized_settings import FixedOptimizedTradingConfig
 
@@ -45,7 +45,7 @@ def analyze_money_performance(initial_capital: float = 100000):
     print(f"Starting Capital: ₹{initial_capital:,.0f}")
     
     # Run different configurations
-    engine = BacktestEngine(initial_capital=initial_capital)
+    engine = EnhancedBacktestEngine(initial_capital=initial_capital)
     
     configurations = {
         'baseline': {

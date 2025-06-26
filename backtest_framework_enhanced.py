@@ -23,13 +23,66 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
-# Import base framework
-from backtest_framework import BacktestEngine, BacktestMetrics, TradeResult
+# Import configurations
 from config.settings import TradingConfig
 from config.fixed_optimized_settings import FixedOptimizedTradingConfig
 
 import logging
 logger = logging.getLogger(__name__)
+
+# Define metrics classes (previously in backtest_framework)
+@dataclass
+class TradeResult:
+    """Single trade result"""
+    symbol: str
+    entry_date: datetime
+    exit_date: datetime
+    entry_price: float
+    exit_price: float
+    direction: int  # 1 for long, -1 for short
+    pnl_percent: float
+    pnl_amount: float
+    hold_time_bars: int
+    exit_reason: str
+    pattern_score: float = 0.0
+    
+    @property
+    def is_winner(self) -> bool:
+        return self.pnl_percent > 0
+
+
+@dataclass
+class BacktestMetrics:
+    """Complete backtest performance metrics"""
+    # Basic metrics
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float
+    
+    # Profitability
+    total_return: float
+    average_win: float
+    average_loss: float
+    largest_win: float
+    largest_loss: float
+    profit_factor: float
+    
+    # Risk metrics
+    max_drawdown: float
+    max_drawdown_duration: int
+    sharpe_ratio: float
+    sortino_ratio: float
+    
+    # Trading frequency
+    avg_bars_in_trade: float
+    max_consecutive_wins: int
+    max_consecutive_losses: int
+    
+    # Additional info
+    start_date: datetime
+    end_date: datetime
+    total_bars: int
 
 
 @dataclass
@@ -59,8 +112,17 @@ class Position:
             self.current_stop = self.stop_loss
 
 
-class EnhancedBacktestEngine(BacktestEngine):
+class EnhancedBacktestEngine:
     """Enhanced backtesting engine with multi-target support"""
+    
+    def __init__(self, initial_capital: float = 100000):
+        self.initial_capital = initial_capital
+        self.trades: List[TradeResult] = []
+        self.partial_trades: List[Dict] = []
+        
+        # Import cache manager
+        from data.cache_manager import MarketDataCache
+        self.cache_manager = MarketDataCache()
     
     def run_backtest(
         self,
@@ -472,6 +534,32 @@ class EnhancedBacktestEngine(BacktestEngine):
             logger.info(f"Target 1 hits: {target_1_hits}, Target 2 hits: {target_2_hits}")
         
         return metrics
+
+
+    def _get_historical_data(
+        self, 
+        symbol: str, 
+        start_date: datetime, 
+        end_date: datetime
+    ) -> pd.DataFrame:
+        """Get historical data with caching"""
+        
+        # Check cache first
+        cached_data = self.cache_manager.get_cached_data(
+            symbol, start_date, end_date, "5minute"
+        )
+        
+        if cached_data is not None and not cached_data.empty:
+            logger.info("Using cached data")
+            # Ensure date is index
+            if 'date' in cached_data.columns:
+                cached_data.set_index('date', inplace=True)
+            return cached_data
+        
+        # If no cached data, return empty DataFrame
+        # (In production, would fetch from API)
+        logger.warning(f"No cached data available for {symbol}")
+        return pd.DataFrame()
 
 
 def compare_exit_strategies_enhanced(symbol: str, days: int = 180):
