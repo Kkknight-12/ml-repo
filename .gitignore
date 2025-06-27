@@ -141,6 +141,9 @@ Thumbs.db
 !package-lock.json
 !requirements.txt
 
+# Claude context file (contains project-specific guidance)
+CLAUDE.md
+
 # Credentials and sensitive data
 .kite_session.json
 .zerodha_credentials
