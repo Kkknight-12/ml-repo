@@ -16,7 +16,8 @@ from dataclasses import dataclass
 import pandas as pd
 
 # Import original k-NN
-from ml.lorentzian_knn_fixed_corrected import LorentzianKNN, FeatureSet
+from ml.lorentzian_knn_fixed_corrected import LorentzianKNNFixedCorrected
+from data.data_types import FeatureArrays
 
 # Import new indicators
 from indicators.advanced.fisher_transform import FisherTransform
@@ -25,7 +26,7 @@ from indicators.advanced.market_internals import MarketInternals
 
 
 @dataclass
-class EnhancedFeatureSet(FeatureSet):
+class EnhancedFeatureSet:
     """Extended feature set with Phase 3 indicators"""
     # Original features
     rsi: float = 0.0
@@ -52,7 +53,7 @@ class EnhancedFeatureSet(FeatureSet):
         return np.array(all_features)
 
 
-class EnhancedLorentzianKNN(LorentzianKNN):
+class EnhancedLorentzianKNN:
     """
     Enhanced k-NN classifier with Phase 3 improvements
     """

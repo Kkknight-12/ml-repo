@@ -15,7 +15,7 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 
 from scanner.confirmation_processor import ConfirmationProcessor, ConfirmationResult
-from ml.enhanced_lorentzian_knn import EnhancedLorentzianKNN, EnhancedFeatureSet
+from ml.enhanced_lorentzian_wrapper import EnhancedLorentzianWrapper, EnhancedFeatures
 from ml.adaptive_threshold import AdaptiveMLThreshold
 from config.settings import TradingConfig
 
@@ -25,7 +25,7 @@ class Phase3Result(ConfirmationResult):
     """Extended result with Phase 3 data"""
     adaptive_threshold: float = 3.0
     feature_importance: Dict[str, float] = None
-    enhanced_features: EnhancedFeatureSet = None
+    enhanced_features: EnhancedFeatures = None
     ml_confidence: float = 0.0
 
 
