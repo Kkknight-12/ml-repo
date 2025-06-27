@@ -16,6 +16,8 @@ from ml.walk_forward_optimizer import WalkForwardOptimizer
 from data.smart_data_manager import SmartDataManager
 from scanner.confirmation_processor import ConfirmationProcessor
 from config.phase2_optimized_settings import Phase2OptimizedConfig
+from config.settings import TradingConfig
+from config.adaptive_config import create_adaptive_config
 
 
 def test_walk_forward_single_symbol(symbol: str = 'RELIANCE', days: int = 180):
@@ -67,7 +69,8 @@ def test_walk_forward_single_symbol(symbol: str = 'RELIANCE', days: int = 180):
     results = optimizer.run_optimization(
         df, 
         ConfirmationProcessor,
-        Phase2OptimizedConfig,
+        symbol,
+        data_manager,
         parallel=False  # Sequential for debugging
     )
     

@@ -16,6 +16,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import pickle
 import os
 
+# Import needed config classes
+from config.phase2_optimized_settings import Phase2OptimizedConfig
+from config.settings import TradingConfig
+from config.adaptive_config import create_adaptive_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,7 +142,8 @@ class WalkForwardOptimizer:
                        data: pd.DataFrame,
                        window: OptimizationWindow,
                        processor_class,
-                       config_class) -> OptimizationResult:
+                       symbol: str,
+                       data_manager) -> OptimizationResult:
         """
         Optimize parameters for a single window
         
@@ -145,7 +151,8 @@ class WalkForwardOptimizer:
             data: Full dataset
             window: Optimization window
             processor_class: Bar processor class to use
-            config_class: Config class to use
+            symbol: Symbol being optimized
+            data_manager: Data manager for adaptive config
             
         Returns:
             Optimization result
@@ -165,17 +172,26 @@ class WalkForwardOptimizer:
                     for use_volume in self.param_space['use_volume_weight']:
                         for weights in self.param_space['feature_weights']:
                             
-                            # Create config with current parameters
-                            config = config_class(
-                                ml_threshold=ml_threshold,
+                            # Create Phase2OptimizedConfig
+                            phase2_config = Phase2OptimizedConfig(ml_threshold=ml_threshold)
+                            
+                            # Get adaptive config
+                            stats = data_manager.analyze_price_movement(train_data)
+                            adaptive_config = create_adaptive_config(symbol, '5minute', stats)
+                            
+                            # Create TradingConfig with optimized parameters
+                            trading_config = TradingConfig(
+                                source=adaptive_config.source,
                                 neighbors_count=neighbors,
                                 max_bars_back=max_bars,
-                                feature_weights=weights
+                                feature_count=adaptive_config.feature_count,
+                                features=adaptive_config.features
                             )
                             
                             # Run backtest on training data
                             train_score, train_trades = self._run_backtest(
-                                train_data, processor_class, config
+                                train_data, processor_class, trading_config, 
+                                phase2_config, symbol
                             )
                             
                             # Skip if not enough trades
@@ -195,9 +211,22 @@ class WalkForwardOptimizer:
         
         # Test best parameters on out-of-sample data
         if best_params:
-            config = config_class(**best_params)
+            # Re-create configs with best params
+            phase2_config = Phase2OptimizedConfig(ml_threshold=best_params['ml_threshold'])
+            stats = data_manager.analyze_price_movement(test_data)
+            adaptive_config = create_adaptive_config(symbol, '5minute', stats)
+            
+            trading_config = TradingConfig(
+                source=adaptive_config.source,
+                neighbors_count=best_params['neighbors_count'],
+                max_bars_back=best_params['max_bars_back'],
+                feature_count=adaptive_config.feature_count,
+                features=adaptive_config.features
+            )
+            
             test_score, test_trades = self._run_backtest(
-                test_data, processor_class, config
+                test_data, processor_class, trading_config, 
+                phase2_config, symbol
             )
         else:
             test_score, test_trades = 0.0, 0
@@ -218,20 +247,24 @@ class WalkForwardOptimizer:
     def _run_backtest(self, 
                      data: pd.DataFrame,
                      processor_class,
-                     config) -> Tuple[float, int]:
+                     trading_config: TradingConfig,
+                     phase2_config: Phase2OptimizedConfig,
+                     symbol: str) -> Tuple[float, int]:
         """
         Run backtest and return score and trade count
         
         Args:
             data: Data to backtest on
             processor_class: Processor class
-            config: Configuration
+            trading_config: Trading configuration
+            phase2_config: Phase 2 configuration
+            symbol: Symbol being tested
             
         Returns:
             (score, trade_count)
         """
         # This is a simplified version - would integrate with existing backtest
-        processor = processor_class(config, symbol="TEST", timeframe="5minute")
+        processor = processor_class(trading_config, symbol=symbol, timeframe="5minute")
         
         signals = []
         trades = []
@@ -246,12 +279,14 @@ class WalkForwardOptimizer:
                 volume=row['volume']
             )
             
-            if result and result.signal != 0:
-                signals.append({
-                    'timestamp': idx,
-                    'signal': result.signal,
-                    'price': row['close']
-                })
+            if result and hasattr(result, 'confirmed_signal') and result.confirmed_signal != 0:
+                # Check ML threshold
+                if abs(result.prediction) >= phase2_config.ml_threshold:
+                    signals.append({
+                        'timestamp': idx,
+                        'signal': result.confirmed_signal,
+                        'price': row['close']
+                    })
         
         # Simple P&L calculation (would use SmartExitManager in real version)
         for i, signal in enumerate(signals):
@@ -279,7 +314,8 @@ class WalkForwardOptimizer:
     def run_optimization(self,
                         data: pd.DataFrame,
                         processor_class,
-                        config_class,
+                        symbol: str,
+                        data_manager,
                         parallel: bool = True) -> List[OptimizationResult]:
         """
         Run full walk-forward optimization
@@ -287,7 +323,8 @@ class WalkForwardOptimizer:
         Args:
             data: Full dataset
             processor_class: Processor class to optimize
-            config_class: Config class
+            symbol: Symbol being optimized
+            data_manager: Data manager for adaptive config
             parallel: Whether to run windows in parallel
             
         Returns:
@@ -311,7 +348,8 @@ class WalkForwardOptimizer:
                         data, 
                         window, 
                         processor_class,
-                        config_class
+                        symbol,
+                        data_manager
                     ): window 
                     for window in windows
                 }
@@ -329,7 +367,7 @@ class WalkForwardOptimizer:
             # Run sequentially
             for window in windows:
                 result = self.optimize_window(
-                    data, window, processor_class, config_class
+                    data, window, processor_class, symbol, data_manager
                 )
                 results.append(result)
                 logger.info(f"Completed window {result.window_id}: "
