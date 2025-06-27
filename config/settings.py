@@ -57,6 +57,11 @@ class TradingConfig:
     # Trade Stats
     show_trade_stats: bool = SHOW_TRADE_STATS
     use_worst_case: bool = USE_WORST_CASE
+    
+    # Phase 3 settings (with rollback safety)
+    use_flexible_ml: bool = False  # Feature flag for flexible ML
+    enable_phase3_features: bool = False  # Enable new indicators
+    flexible_ml_rollout_pct: float = 0.0  # Gradual rollout (0-100%)
 
     def get_settings(self) -> Settings:
         """Convert to Settings object for ML model"""
