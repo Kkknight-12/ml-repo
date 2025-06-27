@@ -33,17 +33,19 @@ class Phase2ConfirmationProcessor(ConfirmationProcessor):
         # Get Phase 2 params
         phase2_params = get_confirmation_processor_params()
         
+        # Extract volume params before passing to parent
+        volume_params = phase2_params.pop('volume_params', None)
+        
         # Merge with any provided kwargs
         params = {**phase2_params, **kwargs}
         
         # Initialize parent
         super().__init__(config, symbol, timeframe, **params)
         
-        # Apply relaxed volume parameters
-        if 'volume_params' in params:
-            vp = params['volume_params']
-            self.volume_filter.min_volume_ratio = vp['min_volume_ratio']
-            self.volume_filter.spike_threshold = vp['spike_threshold']
+        # Apply relaxed volume parameters after initialization
+        if volume_params:
+            self.volume_filter.min_volume_ratio = volume_params['min_volume_ratio']
+            self.volume_filter.spike_threshold = volume_params['spike_threshold']
 
 
 def run_phase2_backtest(symbol: str = 'RELIANCE', days: int = 90):
@@ -126,7 +128,10 @@ def run_phase2_backtest(symbol: str = 'RELIANCE', days: int = 90):
             exit_signal = exit_manager.check_exit(
                 symbol=symbol,
                 current_price=row['close'],
-                current_time=idx
+                current_ml_signal=result.prediction if result else 0,
+                timestamp=idx,
+                high=row['high'],
+                low=row['low']
             )
             
             if exit_signal and exit_signal.should_exit:
@@ -152,7 +157,8 @@ def run_phase2_backtest(symbol: str = 'RELIANCE', days: int = 90):
                 })
                 
                 # Clear position
-                exit_manager.exit_position(symbol)
+                if symbol in exit_manager.positions:
+                    del exit_manager.positions[symbol]
                 active_position = None
         
         # Check for new signals (only if no position)
