@@ -97,11 +97,15 @@ class MarketDataCache:
             ORDER BY date
         """
         
+        # Convert datetime objects to strings for SQLite
+        from_date_str = from_date.strftime('%Y-%m-%d %H:%M:%S') if isinstance(from_date, datetime) else str(from_date)
+        to_date_str = to_date.strftime('%Y-%m-%d %H:%M:%S') if isinstance(to_date, datetime) else str(to_date)
+        
         with sqlite3.connect(self.db_path) as conn:
             df = pd.read_sql_query(
                 query, 
                 conn,
-                params=(symbol, interval, from_date, to_date),
+                params=(symbol, interval, from_date_str, to_date_str),
                 parse_dates=['date']
             )
         

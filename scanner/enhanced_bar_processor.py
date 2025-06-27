@@ -244,11 +244,13 @@ class EnhancedBarProcessor:
         if self.debug_mode and (self.bars_processed % 10 == 0 or signal != (self.signal_history[0] if self.signal_history else 0)):
             self._log_debug_info(bar_index, ml_prediction, signal, filter_states, filter_all)
         elif self.bars_processed % 100 == 0 or (self.bars_processed > 50 and abs(ml_prediction) < 0.1):
-            print(f"\n📊 Enhanced DEBUG Bar {bar_index} [{self.symbol}]:")
-            print(f"  ML Prediction (raw): {ml_prediction:.2f}")
-            print(f"  Signal (after filters): {signal}")
-            print(f"  Filters: {filter_states}")
-            print(f"  Training data: {len(self.ml_model.y_train_array)} bars")
+            # Commented out debug output for cleaner test results
+            pass
+            # print(f"\n📊 Enhanced DEBUG Bar {bar_index} [{self.symbol}]:")
+            # print(f"  ML Prediction (raw): {ml_prediction:.2f}")
+            # print(f"  Signal (after filters): {signal}")
+            # print(f"  Filters: {filter_states}")
+            # print(f"  Training data: {len(self.ml_model.y_train_array)} bars")
 
         # Calculate trend filters using stateful indicators
         is_ema_uptrend, is_ema_downtrend = self._calculate_ema_trend_stateful(close)

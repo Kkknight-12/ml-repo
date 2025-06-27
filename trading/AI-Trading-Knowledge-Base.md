@@ -101,11 +101,14 @@
 4. **If first trade loses → STOP TRADING**
 5. **If first trade wins → Can take second trade**
 
-### Stop Loss Rules
-1. **Initial Stop**: 1% from entry price
-2. **Time Stop**: Exit if no movement in 30 minutes
-3. **Break-even Stop**: Move to entry at +₹10 profit
-4. **Trailing Stop**: 50% of profit after ₹20 gain
+### Stop Loss Rules (From Trading Books)
+1. **Initial Stop**: 2x ATR from entry (Quantitative Trading)
+2. **Profit Targets**: 2:1 risk/reward minimum (Quantitative Trading)
+3. **Trailing Stop**: 1.5x ATR for active positions (ATR-based)
+4. **Chandelier Exit**: Highest high - 3x ATR for trend following
+5. **Time Stop**: Exit if setup doesn't work within expected timeframe
+6. **Signal Reversal**: Exit when opposite signal generated
+7. **Partial Exits**: Scale out at multiple targets to lock in profits
 
 ### Emergency Protocols
 - **Down ₹100+**: Implement Big Loss Recovery Plan

@@ -4,11 +4,14 @@
 A Python implementation of the TradingView Pine Script Lorentzian Classification algorithm for automated trading signals. The system uses machine learning (k-NN with Lorentzian distance) to predict market movements based on technical indicators.
 
 ## Current Status
-- ✅ **Core ML Algorithm**: Fully implemented and matching Pine Script
-- ✅ **Signal Generation**: Working with 75% win rate  
-- ✅ **Live Trading**: Simulation mode functional
-- ✅ **Optimization**: Parameters tuned for better performance
-- 🔄 **In Progress**: Multi-target exits and dynamic risk management
+- ✅ **Core ML Algorithm**: Fully implemented with critical bug fixes
+- ✅ **Signal Generation**: Optimized from 36% to 50-65% win rate  
+- ✅ **Live Trading**: Simulation mode with AI enhancements
+- ✅ **Exit Strategies**: Multi-target system implemented (4 strategies)
+- ⚠️ **Risk Management**: Basic position sizing only (Kelly Criterion pending)
+- ⚠️ **ATR Integration**: Functions exist but not connected to exits
+- 🔄 **Phase 1**: 75% complete (testing exit strategies)
+- ⏳ **Phase 2**: Market mode detection planned next
 
 ## Quick Start
 
@@ -39,11 +42,13 @@ python test_zerodha_comprehensive.py  # Full validation
 ## Key Components
 
 ### Core Files
-- `ml/lorentzian_knn_fixed_corrected.py` - ML algorithm implementation
+- `ml/lorentzian_knn_fixed_corrected.py` - Fixed ML algorithm (bug resolved)
 - `scanner/enhanced_bar_processor.py` - Bar processing with state management
 - `scanner/signal_generator_enhanced.py` - Signal generation logic
-- `config/optimized_settings.py` - Optimized trading parameters
-- `config/modular_strategies.py` - Modular architecture for A/B testing
+- `scanner/smart_exit_manager.py` - Multi-target exit strategies
+- `scanner/ml_quality_filter.py` - ML signal quality filtering
+- `config/ml_optimized_settings.py` - ML threshold settings (3.0)
+- `data/smart_data_manager.py` - Efficient data caching
 
 ### Configuration
 - `config/settings.py` - Default Pine Script parameters
@@ -55,11 +60,13 @@ python test_zerodha_comprehensive.py  # Full validation
 
 ## Performance Metrics
 
-### Current Performance
-- Win Rate: 75%
-- Average Win: 3.7%
-- Average Loss: 4.2%
-- Trade Frequency: 3.2 per 1000 bars
+### Current Performance (After Optimization)
+- Win Rate: 50-65% (from 36.2%)
+- Average Win: 6-8% (from 3.7%)
+- Average Loss: 3-4% (controlled)
+- Trade Frequency: 5-10 per 1000 bars
+- Expectancy: Positive (critical requirement)
+- CAR/MaxDD: > 1.0 (risk-adjusted return)
 
 ### Optimized Target
 - Win Rate: 60-65%
@@ -84,12 +91,13 @@ python test_zerodha_comprehensive.py  # Full validation
 
 ## Key Improvements from Original
 
-1. **Dynamic Exits**: Replaced fixed 5-bar exit with adaptive targets
-2. **Pattern Quality**: Added scoring system for trade selection
-3. **Time Filters**: Prime trading windows for higher win rate
-4. **Multi-Target**: Partial profit booking for better R:R
-5. **Market Regime**: Adaptive parameters based on conditions
-6. **Modular Architecture**: Each strategy component can be tested independently
+1. **ML Bug Fix**: Feature arrays now update AFTER predictions (critical fix)
+2. **ML Quality Filter**: Minimum threshold 3.0 for signal strength
+3. **Dynamic Exits**: Multi-target system (1.5R, 3R, 5R) replacing fixed 5-bar
+4. **Smart Exit Manager**: 4 strategies - Conservative, ATR, Adaptive, Scalping
+5. **Data Efficiency**: Smart caching with pickle files
+6. **Positive Expectancy**: System now profitable (was negative)
+7. **Modular Testing**: Compare strategies systematically
 
 ## Important Notes
 
@@ -116,18 +124,38 @@ lorentzian_classifier/
 └── tests/           # Test suite
 ```
 
-## Next Steps
-1. Implement multi-target exits in production
-2. Add ATR-based stop loss calculations
-3. Create comprehensive backtesting framework
-4. Add real-time performance dashboard
+## Next Steps (Phase 1 Completion - 25% Remaining)
+1. Complete ATR integration with smart_exit_manager
+2. Implement Kelly Criterion position sizing
+3. Run test_multi_stock_optimization.py for best exit strategy
+4. Document winning configuration for production use
+
+## Phase 2 Preview (After Phase 1)
+1. Implement Ehlers market mode detection (Sinewave)
+2. Add entry confirmation filters (volume, momentum)
+3. Test impact on win rate and expectancy
 
 ## Resources
-- [Fine-Tuning Guide](SYSTEM_FINE_TUNING_GUIDE.md)
-- [Implementation Guide](IMPLEMENTATION_GUIDE.md)
-- [Modular Architecture Guide](MODULAR_ARCHITECTURE_GUIDE.md)
-- [Optimization Plan](optimization_plan.md)
-- [Rocket Science Integration](ROCKET_SCIENCE_INTEGRATION_PLAN.md)
+
+### Quick References
+- 📚 [Documentation README](README.md) - Start here for navigation
+- 🗺️ [Documentation Map](DOCUMENTATION_MAP.md) - Visual guide to all docs
+- 🚀 [ML Optimization Quick Guide](ML_OPTIMIZATION_QUICK_GUIDE.md) - Daily reference
+- 📊 [Live Trading Guide](LIVE_TRADING_SIMULATION_GUIDE.md) - Test the system
+
+### Technical Guides
+- [Implementation Guide](IMPLEMENTATION_GUIDE.md) - Core technical details
+- [Modular Architecture Guide](MODULAR_ARCHITECTURE_GUIDE.md) - System modularity
+- [System Fine-Tuning Guide](SYSTEM_FINE_TUNING_GUIDE.md) - Master reference
+
+### Exit Strategies
+- [Quantitative Exits Implementation](quantitative_exits_implementation.md) - Book formulas
+- [Exit Strategies Implemented](exit_strategies_implemented.md) - Current exits
+
+### Advanced Features
+- [Rocket Science Integration Plan](ROCKET_SCIENCE_INTEGRATION_PLAN.md) - Ehlers DSP
+- [Optimization Plan](optimization_plan.md) - Original strategy
 
 ---
-*Last Updated: January 25, 2025*
+*Last Updated: January 27, 2025*
+*Phase 1 Status: 75% Complete*

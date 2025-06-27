@@ -197,13 +197,31 @@ def test_entry_logic():
     print(f"ML Signals (non-zero): {ml_signals}")
     print(f"After filters: {filter_pass}")
     print(f"Final entries: {entries}")
-    print(f"\nConversion rate: {entries/ml_signals*100:.1f}% of ML signals become entries")
     
-    if entries < ml_signals * 0.1:
-        print("\n⚠️ WARNING: Very few ML signals convert to entries!")
-        print("   Check if entry conditions are too restrictive")
+    if ml_signals > 0:
+        print(f"\nConversion rate: {entries/ml_signals*100:.1f}% of ML signals become entries")
+        
+        if entries < ml_signals * 0.1:
+            print("\n⚠️ WARNING: Very few ML signals convert to entries!")
+            print("   Check if entry conditions are too restrictive")
+    else:
+        print("\n⚠️ WARNING: No ML signals generated in this period!")
+        print("   Need more data or check if ML is working")
 
 
 if __name__ == "__main__":
-    analyze_ml_vs_entries()
-    test_entry_logic()
+    try:
+        analyze_ml_vs_entries()
+    except Exception as e:
+        print(f"Error in analyze_ml_vs_entries: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print("\n" + "="*80 + "\n")
+    
+    try:
+        test_entry_logic()
+    except Exception as e:
+        print(f"Error in test_entry_logic: {e}")
+        import traceback
+        traceback.print_exc()
