@@ -19,6 +19,7 @@ from indicators.advanced.volume_weighted_momentum import VolumeWeightedMomentum
 from indicators.advanced.market_internals import MarketInternals
 from config.settings import TradingConfig
 from config.constants import PREDICTION_LENGTH
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,14 @@ class FlexibleBarProcessor(EnhancedBarProcessor):
         
         # Performance comparison
         self.prediction_comparison = []
+        
+        # Training data buffer for flexible ML
+        # Store (features, bar_index, close) to generate labels later
+        self.training_buffer = deque(maxlen=PREDICTION_LENGTH + 1)
+        
+        # Signal tracking for flexible ML
+        self._prev_flexible_signal = 0
+        self._last_flexible_entry_bar = -100
         
         logger.info(f"Initialized FlexibleBarProcessor with flexible_ml={use_flexible_ml}")
     
@@ -144,11 +153,52 @@ class FlexibleBarProcessor(EnhancedBarProcessor):
             feature_importance = self.flexible_ml.get_feature_importance()
             ml_system = "flexible"
             
+            # Log first non-zero prediction
+            if flexible_prediction != 0 and not hasattr(self, '_logged_first_prediction'):
+                ml_state = self.flexible_ml.get_state()
+                logger.debug(f"First non-zero flexible prediction: {flexible_prediction:.2f} at bar {self.bars_processed}, training size: {ml_state['training_size']}")
+                self._logged_first_prediction = True
+            
             # Update flexible ML training data if we have a signal
             if base_result and abs(base_result.prediction) > 0:
                 feature_set = self.flexible_ml.update_features(all_features)
-                # Add to training after prediction_length bars
-                # (This would be done properly with future price data)
+                # Add current features to training buffer
+                self.training_buffer.append({
+                    'features': all_features.copy(),
+                    'bar_index': self.bars_processed,
+                    'close': close
+                })
+                
+                # Generate training data when we have future price info
+                if len(self.training_buffer) > PREDICTION_LENGTH:
+                    # Get data from PREDICTION_LENGTH bars ago
+                    old_data = self.training_buffer[0]
+                    current_close = close
+                    old_close = old_data['close']
+                    
+                    # Generate label based on price movement
+                    if old_close < current_close:
+                        # Price went up, so PREDICTION_LENGTH bars ago was a good short
+                        label = -1  # Short
+                    elif old_close > current_close:
+                        # Price went down, so PREDICTION_LENGTH bars ago was a good long
+                        label = 1   # Long
+                    else:
+                        label = 0   # Neutral
+                    
+                    # Create feature set and add training data
+                    old_feature_set = FlexibleFeatureSet(
+                        features=old_data['features'],
+                        timestamp=old_data['bar_index']
+                    )
+                    
+                    # Add to flexible ML training
+                    self.flexible_ml.add_training_data(old_feature_set, label)
+                    
+                    # Log periodically
+                    if self.bars_processed % 100 == 0:
+                        ml_state = self.flexible_ml.get_state()
+                        logger.debug(f"Flexible ML training size: {ml_state['training_size']}, bar: {self.bars_processed}")
         else:
             # Use original prediction
             flexible_prediction = base_result.prediction if base_result else 0.0
@@ -166,8 +216,8 @@ class FlexibleBarProcessor(EnhancedBarProcessor):
             
             # Log significant differences
             if abs(base_result.prediction - flexible_prediction) > 2.0:
-                logger.info(f"Prediction divergence: Original={base_result.prediction:.2f}, "
-                          f"Flexible={flexible_prediction:.2f}")
+                logger.debug(f"Prediction divergence: Original={base_result.prediction:.2f}, "
+                           f"Flexible={flexible_prediction:.2f}")
         
         # Create result
         if base_result or (self.use_flexible_ml and abs(flexible_prediction) >= self.config.neighbors_count):
@@ -176,11 +226,53 @@ class FlexibleBarProcessor(EnhancedBarProcessor):
                 base_result.prediction if base_result else 0.0
             )
             
-            # Determine signal
-            if abs(final_prediction) >= self.config.neighbors_count:
-                signal = 1 if final_prediction > 0 else -1
+            # Determine signal based on active ML system
+            if self.use_flexible_ml:
+                # Calculate filter_all from individual filter states
+                if base_result and base_result.filter_states:
+                    filter_all = all(base_result.filter_states.values())
+                else:
+                    filter_all = False
+                
+                if flexible_prediction > 0 and filter_all:
+                    signal = 1  # Long
+                elif flexible_prediction < 0 and filter_all:
+                    signal = -1  # Short
+                else:
+                    signal = self._prev_flexible_signal  # Keep previous signal
+                
+                # Check for signal change
+                is_new_signal = (signal != self._prev_flexible_signal and signal != 0)
+                self._prev_flexible_signal = signal
+                
+                # Generate entry signals only after warmup and with proper cooldown
+                start_long = False
+                start_short = False
+                
+                if self.bars_processed >= self.config.max_bars_back:
+                    # Check cooldown period (avoid rapid re-entry)
+                    bars_since_entry = self.bars_processed - self._last_flexible_entry_bar
+                    
+                    if is_new_signal and bars_since_entry > 10:  # 10 bar cooldown
+                        # Simplified entry logic for flexible ML
+                        # Just require new signal and filters passing
+                        if signal == 1 and filter_all:
+                            start_long = True
+                            self._last_flexible_entry_bar = self.bars_processed
+                        elif signal == -1 and filter_all:
+                            start_short = True
+                            self._last_flexible_entry_bar = self.bars_processed
+                
+                # Use base exit signals
+                end_long = base_result.end_long_trade if base_result else False
+                end_short = base_result.end_short_trade if base_result else False
             else:
+                # Use original system signals
                 signal = base_result.signal if base_result else 0
+                start_long = base_result.start_long_trade if base_result else False
+                start_short = base_result.start_short_trade if base_result else False
+                end_long = base_result.end_long_trade if base_result else False
+                end_short = base_result.end_short_trade if base_result else False
             
             return FlexibleBarResult(
                 # Required BarResult fields
@@ -191,10 +283,10 @@ class FlexibleBarProcessor(EnhancedBarProcessor):
                 close=close,
                 prediction=final_prediction,
                 signal=signal,
-                start_long_trade=base_result.start_long_trade if base_result else False,
-                start_short_trade=base_result.start_short_trade if base_result else False,
-                end_long_trade=base_result.end_long_trade if base_result else False,
-                end_short_trade=base_result.end_short_trade if base_result else False,
+                start_long_trade=start_long,
+                start_short_trade=start_short,
+                end_long_trade=end_long,
+                end_short_trade=end_short,
                 filter_states=base_result.filter_states if base_result else {},
                 is_early_signal_flip=base_result.is_early_signal_flip if base_result else False,
                 prediction_strength=abs(final_prediction) / self.config.neighbors_count,
